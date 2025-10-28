@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--milvus"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+spec:
+  containers:
+     # Etcd sidecar
+    - name: etcd
+      image: icr.io/ai-services-private/etcd:3.6.5
+      command:
+        - etcd
+        - --data-dir=/etcd
+        - -advertise-client-urls=http://127.0.0.1:2379
+        - -listen-client-urls=http://0.0.0.0:2379
+      env:
+        - name: ETCD_AUTO_COMPACTION_MODE
+          value: "revision"
+        - name: ETCD_AUTO_COMPACTION_RETENTION
+          value: "1000"
+        - name: ETCD_QUOTA_BACKEND_BYTES
+          value: "4294967296"
+        - name: ETCD_SNAPSHOT_COUNT
+          value: "50000"
+      ports:
+        - name: etcd
+          containerPort: 2379
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      workingDir: /
+      volumeMounts:
+        - name: etcd-data
+          mountPath: /etcd
+      livenessProbe:
+        exec:
+          command:
+            - etcdctl
+            - endpoint
+            - health
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 20
+        failureThreshold: 3
+    
+    # MinIO sidecar
+    - name: minio
+      image: icr.io/ai-services-private/minio:RELEASE.2025-09-07T16-13-09Z
+      command: ["minio", "server", "/minio_data", "--console-address", ":9001"]
+      env:
+        - name: MINIO_ACCESS_KEY
+          value: minioadmin
+        - name: MINIO_SECRET_KEY
+          value: minioadmin
+      ports:
+        - name: minio-api
+          containerPort: 9000
+        - name: minio-console
+          containerPort: 9001
+      volumeMounts:
+        - mountPath: /minio_data
+          name: minio-storage
+      livenessProbe:
+        httpGet:
+          path: /minio/health/live
+          port: 9000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 20
+        failureThreshold: 3
+
+    # Milvus main container
+    - name: milvus
+      image: icr.io/ppc64le-oss/milvus-ppc64le:v2.5.3
+      command: ["milvus", "run", "standalone"]
+      env:
+        - name: ETCD_ENDPOINTS
+          value:  http://127.0.0.1:2379
+        - name: MINIO_ADDRESS
+          value: 127.0.0.1:9000
+        - name: MINIO_ACCESS_KEY
+          value: minioadmin
+        - name: MINIO_SECRET_KEY
+          value: minioadmin
+        - name: MINIO_USE_SSL
+          value: "false"
+      ports:
+        - name: milvus-grpc
+          containerPort: 19530
+          # hostPort: 19530
+        - name: milvus-metrics
+          containerPort: 9091
+          # hostPort: 9091
+      resources:
+        requests:
+          cpu: 2
+          memory: 8Gi
+        limits:
+          cpu: 4
+          memory: 16Gi
+      volumeMounts:
+        - mountPath: /var/lib/milvus
+          name: milvus-data
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 9091
+        initialDelaySeconds: 90
+        periodSeconds: 30
+        timeoutSeconds: 20
+        failureThreshold: 3
+
+  volumes:
+    - name: etcd-data
+      hostPath:
+        path: "/var/lib/ai-services/{{ .AppName }}/volumes/etcd"
+        type: DirectoryOrCreate
+    - name: minio-storage
+      hostPath:
+        path: "/var/lib/ai-services/{{ .AppName }}/volumes/minio
+        type: DirectoryOrCreate
+    - name: milvus-data
+      hostPath:
+        path: "/var/lib/ai-services/{{ .AppName }}/volumes/milvus"
+        type: DirectoryOrCreate
