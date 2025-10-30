@@ -6,7 +6,7 @@ ARG MC_VERSION=RELEASE.2025-08-13T08-35-41Z
 ENV GOPATH=/go
 ENV CGO_ENABLED=0
 
-RUN dnf install -y wget git make && dnf clean all
+RUN dnf install -y --disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms wget git make && dnf clean all
 
 ARG GO_VERSION=1.24.9
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz -O go.tar.gz && \
@@ -31,7 +31,7 @@ RUN git clone --branch ${MC_VERSION} --single-branch https://github.com/minio/mc
 # Build the mc binary. The output will be a single 'mc' executable.
 RUN make
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.6
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
 
 ENV MINIO_ACCESS_KEY_FILE=access_key \
     MINIO_SECRET_KEY_FILE=secret_key \
