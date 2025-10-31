@@ -59,6 +59,11 @@ func configureCmd() *cobra.Command {
 }
 
 func runServiceReport() error {
+	// validate spyre attachment first before running servicereport
+	err := validateSpyreAttachment()
+	if err != nil {
+		return err
+	}
 	service_report_image := "icr.io/ai-services-private/tools:latest"
 	cmd := exec.Command(
 		"podman",
