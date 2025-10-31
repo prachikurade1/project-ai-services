@@ -2,7 +2,7 @@ import time
 import base64
 import regex as re
 
-from llm_utils import query_vllm
+from common.llm_utils import query_vllm
 from reranker_utils import rerank_documents
 
 

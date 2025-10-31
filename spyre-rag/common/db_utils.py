@@ -1,4 +1,6 @@
+from glob import glob
 import os
+import shutil
 import numpy as np
 import hashlib
 import joblib
@@ -10,8 +12,10 @@ from pymilvus import (
     FieldSchema, DataType
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
-from emb_utils import FastAPIEmbeddingFunction
+from common.emb_utils import FastAPIEmbeddingFunction
+from common.misc_utils import LOCAL_CACHE_DIR, get_logger
 
+logger = get_logger("Milvus")
 
 def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
     """
@@ -27,39 +31,35 @@ def generate_chunk_id(filename: str, page_content: str, index: int) -> int:
 class MilvusVectorStore:
     def __init__(
         self,
-        host="localhost",
-        port="19530",
-        db_prefix="RAG_DB",
+        host=os.getenv("MILVUS_HOST"),
+        port=os.getenv("MILVUS_PORT"),
+        db_prefix=os.getenv("MILVUS_DB_PREFIX"),
         emb_name=None,
-        vlm_name=None,
         llm_name=None
     ):
         self.host = host
         self.port = port
         self.db_prefix = db_prefix
         self.emb_name = emb_name
-        self.vlm_name = vlm_name
         self.llm_name = llm_name
-
-        connections.connect("default", host=self.host, port=self.port)
-
         self.collection = None
         self.collection_name = None
         self._embedder = None
         self._embedder_config = {}
-
         self.page_content_corpus = []
         self.metadata_map = []
         self.vectorizer = None
         self.sparse_matrix = None
 
+        connections.connect("default", host=self.host, port=self.port)
+
     def _generate_collection_name(self):
-        base = f"{self.emb_name}_{self.vlm_name}_{self.llm_name}"
+        base = f"{self.emb_name}_{self.llm_name}"
         hash_part = hashlib.md5(base.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
     def _get_index_paths(self):
-        base_path = f"{self.collection_name}_sparse_index"
+        base_path = os.path.join(LOCAL_CACHE_DIR, f"{self.collection_name}_sparse_index")
         return f"{base_path}_vectorizer.joblib", f"{base_path}_matrix.npz", f"{base_path}_metadata.joblib"
 
     def _save_sparse_index(self):
@@ -74,7 +74,7 @@ class MilvusVectorStore:
             self.vectorizer = joblib.load(vectorizer_path)
             self.sparse_matrix = sparse.load_npz(matrix_path)
             self.metadata_map = joblib.load(metadata_path)
-            print(f"✅ Loaded sparse index for collection '{self.collection_name}'.")
+            logger.info(f"✅ Loaded sparse index for collection '{self.collection_name}'.")
             return True
         return False
 
@@ -102,28 +102,42 @@ class MilvusVectorStore:
 
         return collection
 
-    def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens, deployment_type):
+    def _ensure_embedder(self, emb_model, emb_endpoint, max_tokens):
         config = {"model": emb_model, "endpoint": emb_endpoint, "max_tokens": max_tokens}
         if self._embedder is None or self._embedder_config != config:
-            print(f"⚙️ Initializing embedder: {emb_model}")
-            self._embedder = FastAPIEmbeddingFunction(emb_model, emb_endpoint, max_tokens, deployment_type)
+            logger.info(f"⚙️ Initializing embedder: {emb_model}")
+            self._embedder = FastAPIEmbeddingFunction(emb_model, emb_endpoint, max_tokens)
             self._embedder_config = config
 
     def reset_collection(self):
         name = self._generate_collection_name()
         if utility.has_collection(name):
             utility.drop_collection(name)
-            print(f"✅ Collection {name} deleted.")
+            logger.info(f"✅ Collection {name} deleted.")
         else:
-            print(f"ℹ️ Collection {name} does not exist.")
+            logger.info(f"ℹ️ Collection {name} does not exist.")
+
+        files_to_remove = glob(os.path.join(LOCAL_CACHE_DIR, name+"*"))
+        if files_to_remove:
+            for file_path in files_to_remove:
+                try:
+                    if os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                        continue
+                    os.remove(file_path)
+                except OSError as e:
+                    logger.error(f"Error removing {file_path}: {e}")
+            logger.info("Local cache cleaned up")
+        else:
+            logger.info("Local cache cleaned up already!")
 
         self.page_content_corpus = []
         self.metadata_map = []
         self.vectorizer = None
         self.sparse_matrix = None
 
-    def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, deployment_type, batch_size=10):
-        self._ensure_embedder(emb_model, emb_endpoint, max_tokens, deployment_type)
+    def insert_chunks(self, emb_model, emb_endpoint, max_tokens, chunks, batch_size=10):
+        self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
         self.collection_name = self._generate_collection_name()
 
         sample_embedding = self._embedder.embed_documents([chunks[0]["page_content"]])[0]
@@ -132,7 +146,7 @@ class MilvusVectorStore:
         self.collection = self._setup_collection(self.collection_name, dim)
         self.collection.load()
 
-        print(f"Inserting {len(chunks)} chunks into Milvus...")
+        logger.info(f"Inserting {len(chunks)} chunks into Milvus...")
 
         for i in tqdm(range(0, len(chunks), batch_size), desc='Ingesting Data into Vector DB'):
             batch = chunks[i:i + batch_size]
@@ -162,12 +176,12 @@ class MilvusVectorStore:
                 for cid, fn, t, s, pc, l in zip(chunk_ids, filenames, types, sources, page_contents, languages)
             ])
 
-        print("Fitting external BM25 (TF-IDF)...")
+        logger.info("Fitting external BM25 (TF-IDF)...")
         self.vectorizer = TfidfVectorizer()
         self.sparse_matrix = self.vectorizer.fit_transform(self.page_content_corpus)
 
         self._save_sparse_index()
-        print(f"✅ Inserted {len(chunks)} chunks into collection '{self.collection_name}'.")
+        logger.info(f"✅ Inserted {len(chunks)} chunks into collection '{self.collection_name}'.")
 
     def _rrf_fusion(self, dense_results, sparse_results, top_k):
         """
@@ -203,7 +217,7 @@ class MilvusVectorStore:
         return final_results
 
     def search(self, query, emb_model, emb_endpoint, max_tokens, top_k=5, deployment_type='cpu', mode="hybrid", language='en'):
-        self._ensure_embedder(emb_model, emb_endpoint, max_tokens, deployment_type)
+        self._ensure_embedder(emb_model, emb_endpoint, max_tokens)
         self.collection_name = self._generate_collection_name()
 
         if not utility.has_collection(self.collection_name):

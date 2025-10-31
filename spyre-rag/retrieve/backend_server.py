@@ -1,16 +1,16 @@
 import json
+import os
 
 from flask import Flask, request, jsonify, Response, stream_with_context
 import time
-import requests
 from pymilvus import connections
-from db_utils import MilvusVectorStore, VectorStoreManager
-from misc_utils import get_model_endpoints
+from common.db_utils import MilvusVectorStore, VectorStoreManager
+from common.misc_utils import get_model_endpoints
 from backend_utils import search_and_answer_backend, search_only
-from llm_utils import query_vllm_stream
+from common.llm_utils import query_vllm_stream
 
-MILVUS_HOST = "localhost"
-MILVUS_PORT = "19530"
+MILVUS_HOST = os.getenv("MILVUS_HOST")
+MILVUS_PORT = os.getenv("MILVUS_PORT")
 connections.connect("default", host=MILVUS_HOST, port=MILVUS_PORT)
 
 vectorstore = None

@@ -1,8 +1,7 @@
 import re
 import time
-import base64
 
-from llm_utils import query_vllm
+from common.llm_utils import query_vllm
 from reranker_utils import rerank_documents
 from retrieval_utils import retrieve_documents, show_document_content, contains_chinese_regex
 
@@ -78,8 +77,7 @@ def search_and_answer_backend(
 
 
 def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, reranker_endpoint, top_k, top_r,
-                use_reranker, language, vectorstore, deployment_type):
-    print(f'Query language: {language}')
+                use_reranker, vectorstore, deployment_type):
     # Perform retrieval
     retrieval_start = time.time()
     print("parameters")
@@ -88,7 +86,7 @@ def search_only(question, emb_model, emb_endpoint, max_tokens, reranker_model, r
     print(emb_endpoint)
 
     retrieved_documents, retrieved_scores = retrieve_documents(question, emb_model, emb_endpoint, max_tokens,
-                                                               vectorstore, top_k, deployment_type, 'hybrid', language)
+                                                               vectorstore, top_k, deployment_type, 'hybrid')
     print("retrieved")
     print(retrieved_documents)
     print("endpoint")

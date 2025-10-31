@@ -1,0 +1,9 @@
+FROM icr.io/ai-services-private/rag-base:v0.0.1
+
+WORKDIR /opt/rag
+
+COPY common .
+COPY ingest .
+COPY retrive .
+
+ENTRYPOINT [ "sleep", "infinity" ]
