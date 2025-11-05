@@ -97,16 +97,19 @@ var createCmd = &cobra.Command{
 			return err
 		}
 
-		// calculate the actual available spyre cards
-		pciAddresses, err := helpers.FindFreeSpyreCards()
-		if err != nil {
-			return fmt.Errorf("failed to find free Spyre Cards: %w", err)
-		}
-		actualSpyreCardsCount := len(pciAddresses)
+		var pciAddresses []string
+		if reqSpyreCardsCount > 0 {
+			// calculate the actual available spyre cards
+			pciAddresses, err = helpers.FindFreeSpyreCards()
+			if err != nil {
+				return fmt.Errorf("failed to find free Spyre Cards: %w", err)
+			}
+			actualSpyreCardsCount := len(pciAddresses)
 
-		// validate spyre card requirements
-		if err := validateSpyreCardRequirements(reqSpyreCardsCount, actualSpyreCardsCount); err != nil {
-			return err
+			// validate spyre card requirements
+			if err := validateSpyreCardRequirements(reqSpyreCardsCount, actualSpyreCardsCount); err != nil {
+				return err
+			}
 		}
 
 		// ---- ! ----
