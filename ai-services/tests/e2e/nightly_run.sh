@@ -18,6 +18,18 @@ export PATH=$PATH:$(go env GOPATH)/bin
 echo "Triggering the E2E suite run"
 TEST_OUTPUT=$(make test-generate-report TEST_ARGS="--timeout=2h" DELETE_APP=true)
 
+# Capture the exit code to determine success/failure of the run
+EXIT_CODE=$?
+
 #Capture the output of the suite
 echo "Output of E2E test run"
 echo "$TEST_OUTPUT"
+
+# Analyze the results
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Ginkgo test suite passed successfully."
+    exit 0
+else
+    echo "Ginkgo test suite failed with exit code: $EXIT_CODE."
+    exit 1
+fi
