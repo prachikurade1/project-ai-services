@@ -932,3 +932,20 @@ func (kc *OpenshiftClient) DeleteNamespace(ctx context.Context, name string) err
 func (kc *OpenshiftClient) HTTPProxy(_ context.Context, _, _ string, _ map[string]string, _ []byte) (*types.HTTPProxyResponse, error) {
 	return nil, fmt.Errorf("HTTPProxy not implemented on OpenShift runtime")
 }
+
+// CreateSidecarContainer is not applicable on OpenShift (sidecar containers are
+// managed via pod specs / deployments, not on-the-fly Podman API calls).
+func (kc *OpenshiftClient) CreateSidecarContainer(_ context.Context, _, _, _ string, _ []string) (string, error) {
+	return "", fmt.Errorf("CreateSidecarContainer not supported on OpenShift runtime")
+}
+
+// StopContainer is not applicable on OpenShift.
+func (kc *OpenshiftClient) StopContainer(_ context.Context, _ string) error {
+	return fmt.Errorf("StopContainer not supported on OpenShift runtime")
+}
+
+// CopyFromContainer is not implemented on OpenShift — use oc cp or the
+// Kubernetes API copy subresource instead.
+func (kc *OpenshiftClient) CopyFromContainer(_ context.Context, _, _ string) ([]byte, error) {
+	return nil, fmt.Errorf("CopyFromContainer not supported on OpenShift runtime")
+}

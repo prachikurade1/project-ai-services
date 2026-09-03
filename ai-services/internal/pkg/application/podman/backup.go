@@ -13,7 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 // Backup creates a backup of application data.
@@ -76,16 +75,9 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 		return fmt.Errorf("failed to find container: %w", err)
 	}
 
-	// Obtain the PodmanClient that backs p.runtime so the sidecar helpers can
-	// use it directly. application.Factory.Create always constructs a local
-	// *PodmanClient, so this cast is always valid in the CLI path.
-	pc, ok := p.runtime.(*runtimePodman.PodmanClient)
-	if !ok {
-		return fmt.Errorf("runtime is not a Podman client; backup requires direct Podman access")
-	}
-
-	// Perform backup using the backup package
-	if err := backup.BackupOpenSearch(pc, podName, absBackupFile); err != nil {
+	// p.runtime is runtime.Runtime — works for both local PodmanClient and
+	// RemoteRuntime (remote worker), so no type-assert is needed.
+	if err := backup.BackupOpenSearch(ctx, p.runtime, podName, absBackupFile); err != nil {
 		return err
 	}
 

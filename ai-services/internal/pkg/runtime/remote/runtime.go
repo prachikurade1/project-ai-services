@@ -271,6 +271,38 @@ func (r *RemoteRuntime) ContainerLogs(ctx context.Context, containerNameOrID str
 	return err
 }
 
+func (r *RemoteRuntime) CreateSidecarContainer(ctx context.Context, podID, sidecarName, image string, command []string) (string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CREATE_SIDECAR_CONTAINER,
+		payload.CreateSidecarContainer{PodID: podID, SidecarName: sidecarName, Image: image, Command: command})
+	if err != nil {
+		return "", err
+	}
+
+	var containerID string
+	if err := unmarshalData(res, &containerID); err != nil {
+		return "", err
+	}
+
+	return containerID, nil
+}
+
+func (r *RemoteRuntime) StopContainer(ctx context.Context, containerID string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_STOP_CONTAINER,
+		payload.StopContainer{ContainerID: containerID})
+
+	return err
+}
+
+func (r *RemoteRuntime) CopyFromContainer(ctx context.Context, containerID, srcPath string) ([]byte, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_COPY_FROM_CONTAINER,
+		payload.CopyFromContainer{ContainerID: containerID, SrcPath: srcPath})
+	if err != nil {
+		return nil, err
+	}
+
+	return res.GetData(), nil
+}
+
 func (r *RemoteRuntime) ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error) {
 	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER,
 		payload.ExecInContainer{PodName: podName, ContainerName: containerName, Command: command})

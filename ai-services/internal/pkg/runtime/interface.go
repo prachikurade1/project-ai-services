@@ -42,6 +42,13 @@ type Runtime interface {
 	ContainerExists(ctx context.Context, nameOrID string) (bool, error)
 	ContainerLogs(ctx context.Context, containerNameOrID string) error
 	ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error)
+	// CreateSidecarContainer starts a new sidecar container inside podID and returns its container ID.
+	CreateSidecarContainer(ctx context.Context, podID, sidecarName, image string, command []string) (string, error)
+	// StopContainer stops the container identified by containerID.
+	StopContainer(ctx context.Context, containerID string) error
+	// CopyFromContainer streams the contents of srcPath inside containerID as a
+	// raw tar archive and returns the bytes. Works for both files and directories.
+	CopyFromContainer(ctx context.Context, containerID, srcPath string) ([]byte, error)
 
 	// Network operations
 	ListRoutes(ctx context.Context, labelSelector string) ([]types.Route, error)

@@ -223,6 +223,33 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return marshalOr(out, err)
 
+	case workerpb.CommandType_COMMAND_TYPE_CREATE_SIDECAR_CONTAINER:
+		var req payload.CreateSidecarContainer
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode create_sidecar_container payload: %w", err)
+		}
+		containerID, err := rt.CreateSidecarContainer(ctx, req.PodID, req.SidecarName, req.Image, req.Command)
+
+		return marshalOr(containerID, err)
+
+	case workerpb.CommandType_COMMAND_TYPE_STOP_CONTAINER:
+		var req payload.StopContainer
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode stop_container payload: %w", err)
+		}
+
+		return nil, rt.StopContainer(ctx, req.ContainerID)
+
+	case workerpb.CommandType_COMMAND_TYPE_COPY_FROM_CONTAINER:
+		var req payload.CopyFromContainer
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode copy_from_container payload: %w", err)
+		}
+
+		data, err := rt.CopyFromContainer(ctx, req.ContainerID, req.SrcPath)
+
+		return data, err
+
 	case workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
 		var req payload.DownloadModel
 		if err := json.Unmarshal(p, &req); err != nil {

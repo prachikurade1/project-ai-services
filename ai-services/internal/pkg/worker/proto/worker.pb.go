@@ -61,6 +61,12 @@ const (
 	// The control plane sends an HTTP request; the worker executes it locally
 	// against a pod endpoint and returns the response.
 	CommandType_COMMAND_TYPE_HTTP_PROXY CommandType = 26
+	// Sidecar container primitives — used by backup to drive a sidecar on the
+	// worker node without needing a direct Podman socket on the control plane.
+	CommandType_COMMAND_TYPE_CREATE_SIDECAR_CONTAINER CommandType = 28
+	CommandType_COMMAND_TYPE_STOP_CONTAINER            CommandType = 29
+	// CopyFromContainer streams a path out of a container as a raw tar archive.
+	CommandType_COMMAND_TYPE_COPY_FROM_CONTAINER CommandType = 30
 )
 
 // Enum value maps for CommandType.
@@ -94,6 +100,9 @@ var (
 		25: "COMMAND_TYPE_PROXY_ROUTE",
 		27: "COMMAND_TYPE_DOWNLOAD_MODEL",
 		26: "COMMAND_TYPE_HTTP_PROXY",
+		28: "COMMAND_TYPE_CREATE_SIDECAR_CONTAINER",
+		29: "COMMAND_TYPE_STOP_CONTAINER",
+		30: "COMMAND_TYPE_COPY_FROM_CONTAINER",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":       0,
@@ -124,6 +133,9 @@ var (
 		"COMMAND_TYPE_PROXY_ROUTE":       25,
 		"COMMAND_TYPE_DOWNLOAD_MODEL":    27,
 		"COMMAND_TYPE_HTTP_PROXY":        26,
+		"COMMAND_TYPE_CREATE_SIDECAR_CONTAINER": 28,
+		"COMMAND_TYPE_STOP_CONTAINER":           29,
+		"COMMAND_TYPE_COPY_FROM_CONTAINER":      30,
 	}
 )
 

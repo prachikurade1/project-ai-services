@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -92,6 +93,52 @@ func addDirectoryToTar(tarWriter *tar.Writer, baseDir, path string) error {
 	for _, entry := range entries {
 		if err := addPathToTar(tarWriter, baseDir, filepath.Join(path, entry.Name())); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// ExtractTarBytes extracts a raw tar archive (from podman cp) into destDir.
+func ExtractTarBytes(tarData []byte, destDir string) error {
+	tr := tar.NewReader(bytes.NewReader(tarData))
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("reading tar: %w", err)
+		}
+
+		// Sanitise path to prevent directory traversal
+		target := filepath.Join(destDir, filepath.Clean("/"+hdr.Name)) //nolint:gosec
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			const dirPerm = 0o755
+			if err := os.MkdirAll(target, dirPerm); err != nil {
+				return fmt.Errorf("mkdir %s: %w", target, err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), defaultDirPermission); err != nil {
+				return fmt.Errorf("mkdir parent %s: %w", filepath.Dir(target), err)
+			}
+
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
+			if err != nil {
+				return fmt.Errorf("create %s: %w", target, err)
+			}
+
+			if _, err := io.Copy(f, tr); err != nil {
+				_ = f.Close()
+
+				return fmt.Errorf("write %s: %w", target, err)
+			}
+
+			_ = f.Close()
 		}
 	}
 

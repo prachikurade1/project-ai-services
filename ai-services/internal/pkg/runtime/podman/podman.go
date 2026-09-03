@@ -799,9 +799,9 @@ func (pc *PodmanClient) CopyDirToContainer(containerID, srcDir, destDir string) 
 	return nil
 }
 
-// CreateSidecarContainer creates a sidecar container in the specified pod.
-// Returns the container ID of the created sidecar.
-func (pc *PodmanClient) CreateSidecarContainer(podID, sidecarName, image string, command []string) (string, error) {
+// createSidecarContainer creates and starts a sidecar container inside podID.
+// Returns the new container ID.
+func (pc *PodmanClient) createSidecarContainer(podID, sidecarName, image string, command []string) (string, error) {
 	s := &specgen.SpecGenerator{
 		ContainerBasicConfig: specgen.ContainerBasicConfig{
 			Name:    sidecarName,
@@ -833,8 +833,8 @@ func (pc *PodmanClient) CreateSidecarContainer(podID, sidecarName, image string,
 	return containerID, nil
 }
 
-// StopContainer stops a container by ID.
-func (pc *PodmanClient) StopContainer(containerID string) error {
+// stopContainer stops the container identified by containerID.
+func (pc *PodmanClient) stopContainer(containerID string) error {
 	return containers.Stop(pc.Context, containerID, nil)
 }
 
@@ -845,7 +845,7 @@ type SidecarExecutor func(ctx context.Context, containerID string) error
 // It creates the sidecar, executes the provided function, and ensures cleanup.
 func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string, command []string, executor SidecarExecutor) error {
 	// Create and start sidecar container
-	containerID, err := pc.CreateSidecarContainer(podID, sidecarName, image, command)
+	containerID, err := pc.createSidecarContainer(podID, sidecarName, image, command)
 	if err != nil {
 		return fmt.Errorf("failed to create and start sidecar: %w", err)
 	}
@@ -853,7 +853,7 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 	// Ensure cleanup happens
 	defer func() {
 		logger.Infoln("Cleaning up sidecar container...")
-		stopErr := pc.StopContainer(containerID)
+		stopErr := pc.stopContainer(containerID)
 		if stopErr != nil {
 			logger.Warningf("Failed to stop sidecar container %s: %v\n", containerID, stopErr)
 		}
@@ -865,11 +865,35 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 	return executor(pc.Context, containerID)
 }
 
-// ExecInContainerWithCmd is not implemented for the Podman runtime.
-func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _ []string) (string, error) {
-	logger.Errorf("unsupported method called!")
+// ExecInContainerWithCmd executes cmd inside the container identified by
+// podName (used as the container ID for Podman). containerName is ignored
+// because Podman containers are addressed by their own ID directly.
+func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, podName, _ string, command []string) (string, error) {
+	return pc.ExecInContainerWithOutput(podName, command)
+}
 
-	return "", fmt.Errorf("unsupported method")
+// CreateSidecarContainer implements runtime.Runtime for PodmanClient.
+func (pc *PodmanClient) CreateSidecarContainer(_ context.Context, podID, sidecarName, image string, command []string) (string, error) {
+	return pc.createSidecarContainer(podID, sidecarName, image, command)
+}
+
+// StopContainer implements runtime.Runtime for PodmanClient.
+func (pc *PodmanClient) StopContainer(_ context.Context, containerID string) error {
+	return pc.stopContainer(containerID)
+}
+
+// CopyFromContainer runs `podman cp <containerID>:<srcPath> -` locally and
+// returns the raw tar archive bytes. Works for both files and directories.
+func (pc *PodmanClient) CopyFromContainer(_ context.Context, containerID, srcPath string) ([]byte, error) {
+	cpCmd := exec.CommandContext(pc.Context, "podman", "cp",
+		fmt.Sprintf("%s:%s", containerID, srcPath), "-")
+
+	out, err := cpCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("podman cp from container failed: %w", err)
+	}
+
+	return out, nil
 }
 
 // ─── HTTP proxy tunnel ────────────────────────────────────────────────────────

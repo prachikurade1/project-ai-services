@@ -57,6 +57,31 @@ type ExecInContainer struct {
 	Command       []string `json:"command"`
 }
 
+// ─── Sidecar ──────────────────────────────────────────────────────────────────
+
+// CreateSidecarContainer is the payload for COMMAND_TYPE_CREATE_SIDECAR_CONTAINER.
+// The worker creates a sidecar container inside PodID, starts it, and returns
+// the new container ID as a JSON string in CommandResult.data.
+type CreateSidecarContainer struct {
+	PodID       string   `json:"podId"`
+	SidecarName string   `json:"sidecarName"`
+	Image       string   `json:"image"`
+	Command     []string `json:"command"`
+}
+
+// StopContainer is the payload for COMMAND_TYPE_STOP_CONTAINER.
+type StopContainer struct {
+	ContainerID string `json:"containerId"`
+}
+
+// CopyFromContainer is the payload for COMMAND_TYPE_COPY_FROM_CONTAINER.
+// The worker runs `podman cp <ContainerID>:<SrcPath> -` and returns the raw tar
+// bytes in CommandResult.data.
+type CopyFromContainer struct {
+	ContainerID string `json:"containerId"`
+	SrcPath     string `json:"srcPath"`
+}
+
 type DownloadModel struct {
 	Model string `json:"model"`
 }

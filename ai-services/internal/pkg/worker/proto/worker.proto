@@ -96,4 +96,13 @@ enum CommandType {
   COMMAND_TYPE_HTTP_PROXY                = 26;
 
   COMMAND_TYPE_DOWNLOAD_MODEL            = 27;
+
+  // Sidecar container primitives — used by backup to drive a sidecar on the
+  // worker node without needing a direct Podman socket on the control plane.
+  COMMAND_TYPE_CREATE_SIDECAR_CONTAINER  = 28;
+  COMMAND_TYPE_STOP_CONTAINER            = 29;
+
+  // CopyFromContainer streams a path out of a container as a raw tar archive.
+  // The worker runs `podman cp <container>:<srcPath> -` and returns the bytes.
+  COMMAND_TYPE_COPY_FROM_CONTAINER       = 30;
 }
