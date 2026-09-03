@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
@@ -43,7 +44,7 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 		}
 		logger.Infof("Component ID: %s\n", componentID)
 
-		return p.restoreOpenSearch(ctx, componentID, absFilename)
+		return p.restoreOpenSearch(ctx, appDetails.ID, componentID, absFilename)
 	case "digitize":
 		return p.restoreDigitize(ctx, appDetails, absFilename)
 	default:
@@ -52,8 +53,16 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 }
 
 // restoreOpenSearch restores OpenSearch data using podman sidecar approach.
-func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
-	// Obtain the PodmanClient that backs p.runtime.  application.Factory.Create
+func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, appID, componentID, backupFile string) error {
+	// Use the catalog PS API to find the pod name for the opensearch component.
+	// This routes through the server → gRPC → worker, so it resolves pods on
+	// remote workers correctly without querying the local Podman socket.
+	podName, err := commonBackup.GetOpenSearchPodName(ctx, appID, componentID)
+	if err != nil {
+		return fmt.Errorf("failed to find container: %w", err)
+	}
+
+	// Obtain the PodmanClient that backs p.runtime. application.Factory.Create
 	// always constructs a local *PodmanClient, so this cast is always valid in
 	// the CLI path.
 	pc, ok := p.runtime.(*runtimePodman.PodmanClient)
@@ -61,8 +70,8 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 		return fmt.Errorf("runtime is not a Podman client; restore requires direct Podman access")
 	}
 
-	// Call the OpenSearch-specific restore function
-	return podmanrestore.RestoreOpenSearch(pc, ctx, templateID, backupFile)
+	// Call the OpenSearch-specific restore function with the resolved pod name
+	return podmanrestore.RestoreOpenSearch(pc, ctx, podName, backupFile)
 }
 
 // restoreDigitize restores digitize metadata using the Import API.

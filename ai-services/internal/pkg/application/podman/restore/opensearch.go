@@ -22,27 +22,10 @@ const (
 )
 
 // RestoreOpenSearch restores OpenSearch data using podman sidecar approach.
-// pc must be the PodmanClient already connected to the correct Podman socket
-// (local or remote via CONTAINER_HOST) so that pod operations reach the right
-// host for both local and remote-worker deployments.
-func RestoreOpenSearch(pc *podman.PodmanClient, ctx context.Context, templateID, backupFile string) error {
-	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID)
+// podName is the Podman pod name resolved by the caller via the catalog PS API.
+func RestoreOpenSearch(pc *podman.PodmanClient, ctx context.Context, podName, backupFile string) error {
+	logger.Infof("Restoring OpenSearch data for pod: %s\n", podName)
 	logger.Infoln("OpenSearch Import (Sidecar Container Approach)")
-
-	// Find the OpenSearch pod using the runtime (works for both local and remote workers).
-	pods, err := pc.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to find container: failed to list pods: %w", err)
-	}
-
-	if len(pods) == 0 {
-		return fmt.Errorf("failed to find container: container not found for template ID: %s", templateID)
-	}
-
-	podID := pods[0].ID
-	logger.Infof("Pod ID: %s\n", podID)
 
 	// Extract and locate backup directory
 	backupDir, cleanup, err := ExtractAndLocateBackup(backupFile)
@@ -52,7 +35,7 @@ func RestoreOpenSearch(pc *podman.PodmanClient, ctx context.Context, templateID,
 	defer cleanup()
 
 	// Manage sidecar lifecycle and perform restore
-	return manageSidecarWithGo(pc, ctx, podID, backupDir)
+	return manageSidecarWithGo(pc, ctx, podName, backupDir)
 }
 
 // manageSidecarWithGo manages the lifecycle of a podman sidecar container using runtime package.
