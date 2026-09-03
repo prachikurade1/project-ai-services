@@ -10,53 +10,37 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// OpenSearchPod holds the Podman pod ID and name for the OpenSearch component.
-// Both fields are populated from the catalog PS API response.
-type OpenSearchPod struct {
-	// PodID is the Podman hex pod ID — required by CreateSidecarContainer.
-	PodID string
-	// PodName is the human-readable pod name — accepted by InspectPod.
-	PodName string
-}
-
-// GetOpenSearchPod resolves the OpenSearch pod for an application component
-// by querying the catalog PS API. Returns both the pod ID and name because
-// sidecar creation requires the ID while password lookup uses InspectPod by name.
+// GetOpenSearchPodName resolves the Podman pod name for an OpenSearch component
+// by querying the catalog PS API. The catalog server routes this through the gRPC
+// worker stream, so it works for both local and remote-worker deployments without
+// querying the local Podman socket directly.
+//
+// The pod name (not ID) is returned — the PS API pod ID is a truncated short ID
+// that Podman does not accept for pod operations; the name is always valid.
 //
 // appID is the catalog application UUID; componentID is the opensearch component UUID.
-func GetOpenSearchPod(ctx context.Context, appID, componentID string) (*OpenSearchPod, error) {
+func GetOpenSearchPodName(ctx context.Context, appID, componentID string) (string, error) {
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create catalog client: %w", err)
+		return "", fmt.Errorf("failed to create catalog client: %w", err)
 	}
 
 	psResp, err := appClient.GetApplicationPS(ctx, appID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get application pod status: %w", err)
+		return "", fmt.Errorf("failed to get application pod status: %w", err)
 	}
 
 	// The catalog PS response carries pod labels. For catalog-deployed apps the
 	// ai-services.io/template label holds the component UUID — match on that.
 	for _, pod := range psResp.Components {
 		if pod.Labels["ai-services.io/template"] == componentID {
-			logger.Infof("Pod Name: %s, Pod ID: %s\n", pod.PodName, pod.PodID)
+			logger.Infof("Pod Name: %s\n", pod.PodName)
 
-			return &OpenSearchPod{PodID: pod.PodID, PodName: pod.PodName}, nil
+			return pod.PodName, nil
 		}
 	}
 
-	return nil, fmt.Errorf("pod not found for component ID: %s", componentID)
-}
-
-// GetOpenSearchPodName resolves the Podman pod name for an OpenSearch component.
-// Deprecated: prefer GetOpenSearchPod which also returns the pod ID.
-func GetOpenSearchPodName(ctx context.Context, appID, componentID string) (string, error) {
-	pod, err := GetOpenSearchPod(ctx, appID, componentID)
-	if err != nil {
-		return "", err
-	}
-
-	return pod.PodName, nil
+	return "", fmt.Errorf("pod not found for component ID: %s", componentID)
 }
 
 // ListRagIndicesScript generates the script to list all indices starting with "rag".

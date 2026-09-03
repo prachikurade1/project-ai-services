@@ -67,18 +67,19 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
-	// Use the catalog PS API to resolve both the pod ID and name for the
-	// opensearch component. The catalog server routes this through the gRPC
-	// worker stream, so it works for both local and remote workers.
-	osPod, err := commonBackup.GetOpenSearchPod(ctx, appDetails.ID, componentID)
+	// Use the catalog PS API to find the pod name for the opensearch component.
+	// This routes through the server → gRPC → worker, so it resolves pods on
+	// remote workers correctly without querying the local Podman socket.
+	// The pod name (not ID) is used throughout — the PS API returns a truncated
+	// pod ID that Podman does not accept; the name is always valid.
+	podName, err := commonBackup.GetOpenSearchPodName(ctx, appDetails.ID, componentID)
 	if err != nil {
 		return fmt.Errorf("failed to find opensearch pod: %w", err)
 	}
 
 	// p.runtime is runtime.Runtime — works for both local PodmanClient and
 	// RemoteRuntime (remote worker), so no type-assert is needed.
-	// Pass PodID (hex) for sidecar creation and PodName for password lookup.
-	if err := backup.BackupOpenSearch(ctx, p.runtime, osPod.PodID, osPod.PodName, absBackupFile); err != nil {
+	if err := backup.BackupOpenSearch(ctx, p.runtime, podName, absBackupFile); err != nil {
 		return err
 	}
 

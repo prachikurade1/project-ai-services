@@ -15,12 +15,12 @@ import (
 // BackupOpenSearch performs OpenSearch backup using a sidecar container.
 // rt is the runtime.Runtime for the worker that hosts the OpenSearch pod — it
 // may be a local PodmanClient or a RemoteRuntime that forwards calls over gRPC.
-// podID is the Podman hex pod ID (used for sidecar creation).
-// podName is the human-readable pod name (used for InspectPod / password lookup).
-func BackupOpenSearch(ctx context.Context, rt runtime.Runtime, podID, podName, backupFile string) error {
+// podName is the OpenSearch pod name; it is accepted by both CreateSidecarContainer
+// (specgen.Pod field) and InspectPod.
+func BackupOpenSearch(ctx context.Context, rt runtime.Runtime, podName, backupFile string) error {
 	sidecarName := fmt.Sprintf("opensearch-backup-sidecar-%d", time.Now().Unix())
 
-	containerID, err := rt.CreateSidecarContainer(ctx, podID, sidecarName, vars.ToolImage, []string{"sleep", "3600"})
+	containerID, err := rt.CreateSidecarContainer(ctx, podName, sidecarName, vars.ToolImage, []string{"sleep", "3600"})
 	if err != nil {
 		return fmt.Errorf("failed to create backup sidecar: %w", err)
 	}
