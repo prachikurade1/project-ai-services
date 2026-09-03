@@ -22,17 +22,26 @@ const (
 )
 
 // RestoreOpenSearch restores OpenSearch data using podman sidecar approach.
-func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
+// pc must be the PodmanClient already connected to the correct Podman socket
+// (local or remote via CONTAINER_HOST) so that pod operations reach the right
+// host for both local and remote-worker deployments.
+func RestoreOpenSearch(pc *podman.PodmanClient, ctx context.Context, templateID, backupFile string) error {
 	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID)
 	logger.Infoln("OpenSearch Import (Sidecar Container Approach)")
 
-	// Find OpenSearch container and get pod ID using common function
-	containerName, podID, err := common.FindContainerAndPod(ctx, templateID)
+	// Find the OpenSearch pod using the runtime (works for both local and remote workers).
+	pods, err := pc.ListPods(ctx, map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/template=%s", templateID)},
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to find container: failed to list pods: %w", err)
 	}
 
-	logger.Infof("Container: %s\n", containerName)
+	if len(pods) == 0 {
+		return fmt.Errorf("failed to find container: container not found for template ID: %s", templateID)
+	}
+
+	podID := pods[0].ID
 	logger.Infof("Pod ID: %s\n", podID)
 
 	// Extract and locate backup directory
@@ -43,18 +52,12 @@ func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error
 	defer cleanup()
 
 	// Manage sidecar lifecycle and perform restore
-	return manageSidecarWithGo(ctx, podID, backupDir)
+	return manageSidecarWithGo(pc, ctx, podID, backupDir)
 }
 
 // manageSidecarWithGo manages the lifecycle of a podman sidecar container using runtime package.
-func manageSidecarWithGo(ctx context.Context, podID, backupDir string) error {
+func manageSidecarWithGo(pc *podman.PodmanClient, ctx context.Context, podID, backupDir string) error {
 	sidecarName := fmt.Sprintf("opensearch-restore-sidecar-%d-%d", time.Now().Unix(), os.Getpid())
-
-	// Create podman client to use runtime methods
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
 
 	// Use the generic sidecar lifecycle management from runtime package
 	return pc.ManageSidecarLifecycle(
@@ -64,19 +67,13 @@ func manageSidecarWithGo(ctx context.Context, podID, backupDir string) error {
 		[]string{"sleep", "3600"},
 		func(ctx context.Context, containerID string) error {
 			// Prepare sidecar and perform restore
-			return prepareSidecarAndRestore(ctx, containerID, backupDir)
+			return prepareSidecarAndRestore(pc, ctx, containerID, backupDir)
 		},
 	)
 }
 
 // prepareSidecarAndRestore prepares the sidecar container and performs the restore.
-func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string) error {
-	// Create podman client once for all operations
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
-
+func prepareSidecarAndRestore(pc *podman.PodmanClient, ctx context.Context, containerID, backupDir string) error {
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)

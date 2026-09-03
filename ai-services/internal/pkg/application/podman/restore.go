@@ -11,6 +11,7 @@ import (
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 // Restore restores application data from a backup file for Podman runtime.
@@ -52,14 +53,16 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 
 // restoreOpenSearch restores OpenSearch data using podman sidecar approach.
 func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
-	// Get the Podman context from the runtime client
-	podmanCtx, err := p.getPodmanContext()
-	if err != nil {
-		return err
+	// Obtain the PodmanClient that backs p.runtime.  application.Factory.Create
+	// always constructs a local *PodmanClient, so this cast is always valid in
+	// the CLI path.
+	pc, ok := p.runtime.(*runtimePodman.PodmanClient)
+	if !ok {
+		return fmt.Errorf("runtime is not a Podman client; restore requires direct Podman access")
 	}
 
 	// Call the OpenSearch-specific restore function
-	return podmanrestore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
+	return podmanrestore.RestoreOpenSearch(pc, ctx, templateID, backupFile)
 }
 
 // restoreDigitize restores digitize metadata using the Import API.

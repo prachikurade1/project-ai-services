@@ -14,14 +14,12 @@ import (
 )
 
 // BackupOpenSearch performs OpenSearch backup using a sidecar container.
-func BackupOpenSearch(ctx context.Context, podID, backupFile string) error {
+// pc must be the PodmanClient that is already connected to the correct Podman
+// socket (local or remote via CONTAINER_HOST) — it must NOT be created freshly
+// here, because that would always connect to the local socket and miss pods
+// running on a remote worker.
+func BackupOpenSearch(pc *podman.PodmanClient, podID, backupFile string) error {
 	sidecarName := fmt.Sprintf("opensearch-backup-sidecar-%d", time.Now().Unix())
-
-	// Create podman client to use runtime methods
-	pc, err := podman.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to create podman client: %w", err)
-	}
 
 	// Use the generic sidecar lifecycle management from runtime package
 	return pc.ManageSidecarLifecycle(

@@ -10,11 +10,11 @@ import (
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	commonRestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/backup"
-	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimePodman "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 // Backup creates a backup of application data.
@@ -69,23 +69,32 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
-	// Get the Podman context from the runtime client
-	podmanCtx, err := p.getPodmanContext()
+	// Find the OpenSearch pod using the runtime (works for both local and remote workers).
+	// The ai-services.io/template label holds the component UUID for catalog-deployed apps.
+	pods, err := p.runtime.ListPods(ctx, map[string][]string{
+		"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to find container: failed to list pods: %w", err)
 	}
 
-	// Find OpenSearch container and get pod ID using component ID
-	containerName, podID, err := common.FindContainerAndPod(podmanCtx, componentID)
-	if err != nil {
-		return err
+	if len(pods) == 0 {
+		return fmt.Errorf("failed to find container: container not found for template ID: %s", componentID)
 	}
 
-	logger.Infof("Container: %s\n", containerName)
+	podID := pods[0].ID
 	logger.Infof("Pod ID: %s\n", podID)
 
+	// Obtain the PodmanClient that backs p.runtime so the sidecar helpers can
+	// use it directly.  application.Factory.Create always constructs a local
+	// *PodmanClient, so this cast is always valid in the CLI path.
+	pc, ok := p.runtime.(*runtimePodman.PodmanClient)
+	if !ok {
+		return fmt.Errorf("runtime is not a Podman client; backup requires direct Podman access")
+	}
+
 	// Perform backup using the backup package
-	if err := backup.BackupOpenSearch(podmanCtx, podID, absBackupFile); err != nil {
+	if err := backup.BackupOpenSearch(pc, podID, absBackupFile); err != nil {
 		return err
 	}
 
