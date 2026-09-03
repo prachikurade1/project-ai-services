@@ -15,7 +15,9 @@ import (
 // BackupOpenSearch performs OpenSearch backup using a sidecar container.
 // rt is the runtime.Runtime for the worker that hosts the OpenSearch pod — it
 // may be a local PodmanClient or a RemoteRuntime that forwards calls over gRPC.
-func BackupOpenSearch(ctx context.Context, rt runtime.Runtime, podID, backupFile string) error {
+// podID is the Podman hex pod ID (used for sidecar creation).
+// podName is the human-readable pod name (used for InspectPod / password lookup).
+func BackupOpenSearch(ctx context.Context, rt runtime.Runtime, podID, podName, backupFile string) error {
 	sidecarName := fmt.Sprintf("opensearch-backup-sidecar-%d", time.Now().Unix())
 
 	containerID, err := rt.CreateSidecarContainer(ctx, podID, sidecarName, vars.ToolImage, []string{"sleep", "3600"})
@@ -31,14 +33,14 @@ func BackupOpenSearch(ctx context.Context, rt runtime.Runtime, podID, backupFile
 		logger.Infoln("Backup sidecar cleanup completed")
 	}()
 
-	return prepareSidecarAndBackup(ctx, rt, podID, containerID, backupFile)
+	return prepareSidecarAndBackup(ctx, rt, podName, containerID, backupFile)
 }
 
 // prepareSidecarAndBackup prepares the sidecar container and performs the backup.
-// podID is the OpenSearch pod; containerID is the newly created sidecar container.
-func prepareSidecarAndBackup(ctx context.Context, rt runtime.Runtime, podID, containerID, backupFile string) error {
-	// Get OpenSearch password from the pod's mounted secret
-	osPassword, err := getOpenSearchPasswordFromSecret(ctx, rt, podID)
+// podName is the OpenSearch pod name used for InspectPod; containerID is the sidecar.
+func prepareSidecarAndBackup(ctx context.Context, rt runtime.Runtime, podName, containerID, backupFile string) error {
+	// Get OpenSearch password from the pod's mounted secret via InspectPod
+	osPassword, err := getOpenSearchPasswordFromSecret(ctx, rt, podName)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)
 	}
