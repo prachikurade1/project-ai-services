@@ -268,9 +268,10 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 }
 
 // readSSLContents reads and returns the PEM contents of the cert and key files.
-// Returns empty strings when either path is empty.
+// Returns empty strings when either path is empty or the existingCertSentinel
+// is passed (cert bytes are already stored in the existing Podman secret).
 func readSSLContents(certPath, keyPath string) (string, string, error) {
-	if certPath == "" || keyPath == "" {
+	if certPath == "" || keyPath == "" || certPath == existingCertSentinel {
 		return "", "", nil
 	}
 
