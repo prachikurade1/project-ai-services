@@ -50,17 +50,15 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Load SSL certificates into Caddy.
-	// When the cert secret was preserved by a previous --skip-cleanup uninstall and no
-	// new cert paths were supplied, the secret is already mounted inside the container;
-	// only the Caddy Admin API call is needed (no host-path validation).
-	// Otherwise load from the user-supplied host paths, or skip if none were provided.
-	if useExistingCert {
-		if err := caddyCtx.LoadCertificatesFromContainerPaths(ctx); err != nil {
+	// Load SSL certificates into Caddy when user-supplied paths are given.
+	// When useExistingCert is true the preserved caddy-data PVC already has an
+	// autosave that includes the load_files entry — Caddy resumes with the custom
+	// cert active, so no Admin API call is needed and triggering an unnecessary
+	// PATCH reload is avoided.
+	if !useExistingCert {
+		if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 			return err
 		}
-	} else if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
-		return err
 	}
 
 	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
