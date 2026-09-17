@@ -61,6 +61,17 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		}
 	}
 
+	// When reusing the preserved cert (--skip-cleanup re-configure), the
+	// autosave routes carry the correct domain from the previous install.
+	// Query the live catalog-api route to recover it before RegisterCatalogRoutes
+	// sets DOMAIN_SUFFIX — otherwise ComputeDomainSuffix would have fallen back
+	// to the host IP and routes/WaitForTLSReady would use the wrong domain.
+	if useExistingCert {
+		if err := recoverDomainFromCaddy(ctx, caddyCtx); err != nil {
+			logger.Debugf("Could not recover domain from Caddy autosave routes: %v\n", err)
+		}
+	}
+
 	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
 }
 
@@ -184,6 +195,33 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeURLs); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
+	}
+
+	return nil
+}
+
+// recoverDomainFromCaddy queries the live Caddy Admin API for the catalog-api
+// route and extracts its domain suffix, then updates caddyCtx. This is used
+// after --skip-cleanup re-configure when the autosave already has the correct
+// domain from the previous install but ComputeDomainSuffix had no cert paths
+// to work with and would have fallen back to the host IP.
+// Errors are non-fatal — the caller logs and continues with the host-IP domain.
+func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error {
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
+	if err != nil {
+		return err
+	}
+
+	route, err := proxyManager.GetRouteByID(ctx, "catalog-api")
+	if err != nil {
+		return err
+	}
+
+	// route.Domain is the full host (e.g. "catalog-api.powervm-spyre-pok.cis.ibm.net").
+	// Strip the "catalog-api." prefix to get the domain suffix.
+	const prefix = "catalog-api."
+	if strings.HasPrefix(route.Domain, prefix) {
+		caddyCtx.SetDomainSuffix(strings.TrimPrefix(route.Domain, prefix))
 	}
 
 	return nil
