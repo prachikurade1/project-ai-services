@@ -268,11 +268,18 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 }
 
 // readSSLContents reads and returns the PEM contents of the cert and key files.
-// Returns empty strings when either path is empty or the existingCertSentinel
-// is passed (cert bytes are already stored in the existing Podman secret).
+// Returns the sentinel unchanged when useExistingCert is true — the caddy pod
+// template needs a non-empty sslCertContent value to render the /etc/secret/ssl
+// volume mount (the cert secret itself is already preserved and skipped by
+// existingResources, so the sentinel bytes never land in the secret).
+// Returns empty strings when either path is truly empty (no cert configured).
 func readSSLContents(certPath, keyPath string) (string, string, error) {
-	if certPath == "" || keyPath == "" || certPath == existingCertSentinel {
+	if certPath == "" || keyPath == "" {
 		return "", "", nil
+	}
+
+	if certPath == existingCertSentinel {
+		return existingCertSentinel, existingCertSentinel, nil
 	}
 
 	certBytes, keyBytes, _, err := utils.ReadAndParseCertificates(certPath, keyPath)
