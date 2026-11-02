@@ -105,6 +105,8 @@ type Resources struct {
 // DatasourceSettings defines compatibility and lifecycle settings for datasources attached to a service.
 type DatasourceSettings struct {
 	Required           bool     `yaml:"required,omitempty" json:"required"`
+	AllowConnect       bool     `yaml:"allow_connect,omitempty" json:"allow_connect,omitempty"`
+	AllowDisconnect    bool     `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
 	SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
 }
 
