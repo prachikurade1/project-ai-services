@@ -906,7 +906,7 @@ func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, proxy h
 func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow) error {
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
-		if loadErr == nil && catalogSvc.Datasource != nil && !catalogSvc.Datasource.AllowConnect {
+		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanConnectDatasource(catalogSvc.Datasource) {
 			return &ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("service %q does not allow post-creation datasource connect", svc.ServiceCatalogID),
@@ -922,7 +922,7 @@ func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow
 func (s *DatasourceService) checkAllowDisconnect(services []dbrepo.LinkedServiceRow) error {
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
-		if loadErr == nil && catalogSvc.Datasource != nil && !catalogSvc.Datasource.AllowDisconnect {
+		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanDisconnectDatasource(catalogSvc.Datasource) {
 			return &ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("service %q does not allow datasource disconnect", svc.ServiceCatalogID),

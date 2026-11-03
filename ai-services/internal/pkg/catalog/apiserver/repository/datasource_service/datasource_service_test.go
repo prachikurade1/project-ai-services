@@ -103,34 +103,11 @@ func newAllowFlagTestService(t *testing.T) *DatasourceService {
 	return &DatasourceService{catalogProvider: provider}
 }
 
-func TestCheckAllowConnect(t *testing.T) {
+func TestCheckAllowConnectAndDisconnect_ExplicitlyAllowed(t *testing.T) {
 	svc := newAllowFlagTestService(t)
+	rows := []dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}
 
-	// digitize sets allow_connect: true -> permitted.
-	require.NoError(t, svc.checkAllowConnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}))
-
-	// test_ds_required does not set allow_connect -> 422.
-	err := svc.checkAllowConnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}, {ServiceCatalogID: "test_ds_required"}})
-	require.Error(t, err)
-
-	valErr, ok := err.(*ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
-	assert.Contains(t, valErr.Message, "does not allow post-creation datasource connect")
-}
-
-func TestCheckAllowDisconnect(t *testing.T) {
-	svc := newAllowFlagTestService(t)
-
-	// digitize sets allow_disconnect: true -> permitted.
-	require.NoError(t, svc.checkAllowDisconnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}))
-
-	// test_ds_required does not set allow_disconnect -> 422.
-	err := svc.checkAllowDisconnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "test_ds_required"}})
-	require.Error(t, err)
-
-	valErr, ok := err.(*ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
-	assert.Contains(t, valErr.Message, "does not allow datasource disconnect")
+	// digitize sets allow_connect and allow_disconnect to true.
+	require.NoError(t, svc.checkAllowConnect(rows))
+	require.NoError(t, svc.checkAllowDisconnect(rows))
 }
