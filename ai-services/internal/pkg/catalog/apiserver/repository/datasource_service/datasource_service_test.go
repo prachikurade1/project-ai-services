@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/stretchr/testify/assert"
@@ -58,7 +59,7 @@ func TestConnectDatasourcesToApplication_OwnershipCheck(t *testing.T) {
 	}
 
 	// 1. Attacker calls connect on victim-owned application -> 403 Forbidden
-	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID})
+	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID}, true)
 	assert.Nil(t, resp)
 	require.Error(t, err)
 
@@ -91,4 +92,45 @@ func TestDisconnectDatasourcesFromApplication_OwnershipCheck(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusForbidden, valErr.Code)
 	assert.Equal(t, "user does not own this application", valErr.Message)
+}
+
+func newAllowFlagTestService(t *testing.T) *DatasourceService {
+	t.Helper()
+
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	return &DatasourceService{catalogProvider: provider}
+}
+
+func TestCheckAllowConnect(t *testing.T) {
+	svc := newAllowFlagTestService(t)
+
+	// digitize sets allow_connect: true -> permitted.
+	require.NoError(t, svc.checkAllowConnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}))
+
+	// test_ds_required does not set allow_connect -> 422.
+	err := svc.checkAllowConnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}, {ServiceCatalogID: "test_ds_required"}})
+	require.Error(t, err)
+
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
+	assert.Contains(t, valErr.Message, "does not allow post-creation datasource connect")
+}
+
+func TestCheckAllowDisconnect(t *testing.T) {
+	svc := newAllowFlagTestService(t)
+
+	// digitize sets allow_disconnect: true -> permitted.
+	require.NoError(t, svc.checkAllowDisconnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}))
+
+	// test_ds_required does not set allow_disconnect -> 422.
+	err := svc.checkAllowDisconnect([]dbrepo.LinkedServiceRow{{ServiceCatalogID: "test_ds_required"}})
+	require.Error(t, err)
+
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
+	assert.Contains(t, valErr.Message, "does not allow datasource disconnect")
 }

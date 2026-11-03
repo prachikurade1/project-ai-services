@@ -451,9 +451,11 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 // returns 422 if none are found.
 //
 // This method is the single reusable core for both:
-//   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
-//   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+//   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect), which passes
+//     enforceAllowConnect == true so that services with allow_connect == false reject the request
+//   - the app-creation flow where datasources are pre-attached at deploy time, which passes
+//     enforceAllowConnect == false because allow_connect only restricts the connect API.
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, enforceAllowConnect bool) (*apimodels.ConnectDatasourcesResponse, error) {
 	// Verify application exists and ownership.
 	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
@@ -470,9 +472,11 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 		}
 	}
 
-	// Guard: reject if any eligible service does not permit post-creation connect.
-	if err := s.checkAllowConnect(linkedServices); err != nil {
-		return nil, err
+	// Guard: for the connect API, reject if any eligible service does not permit post-creation connect.
+	if enforceAllowConnect {
+		if err := s.checkAllowConnect(linkedServices); err != nil {
+			return nil, err
+		}
 	}
 
 	var connErrors []apimodels.DatasourceConnectionError
