@@ -348,32 +348,32 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 //	@Failure		401				{object}	ErrorResponse			"Unauthorized"
 //	@Failure		404				{object}	ErrorResponse			"Connector type or service not found"
 //	@Router			/connectors [get]
-func (h *CatalogHandler) serviceAllowedProviders(serviceType string) ([]string, int, error) {
+func (h *CatalogHandler) serviceAllowedProviders(serviceType string) ([]string, bool, int, error) {
 	if serviceType == "" {
-		return nil, http.StatusOK, nil
+		return nil, false, http.StatusOK, nil
 	}
 
 	svc, err := h.provider.LoadService(serviceType)
 	if err != nil {
-		return nil, http.StatusNotFound, fmt.Errorf("service %q not found", serviceType)
+		return nil, false, http.StatusNotFound, fmt.Errorf("service %q not found", serviceType)
 	}
 
 	if svc.Datasource == nil {
-		return []string{}, http.StatusOK, nil
+		return nil, true, http.StatusOK, nil
 	}
 
-	return svc.Datasource.SupportedProviders, http.StatusOK, nil
+	return svc.Datasource.SupportedProviders, false, http.StatusOK, nil
 }
 
 func (h *CatalogHandler) ListConnectorProviders(c *gin.Context) {
-	allowed, code, err := h.serviceAllowedProviders(c.Query("service_type"))
+	allowed, emptyResult, code, err := h.serviceAllowedProviders(c.Query("service_type"))
 	if err != nil {
 		c.JSON(code, ErrorResponse{Error: err.Error()})
 
 		return
 	}
 
-	if allowed != nil && len(allowed) == 0 {
+	if emptyResult {
 		c.JSON(http.StatusOK, []types.ConnectorResponse{})
 
 		return
