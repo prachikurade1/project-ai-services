@@ -244,6 +244,19 @@ definitions:
       error:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceDataResponse:
+    properties:
+      data: {}
+      datasource_id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      provider:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceListResponse:
     properties:
       data:
@@ -2926,6 +2939,70 @@ paths:
       security:
       - BearerAuth: []
       summary: Get connected applications for a datasource
+      tags:
+      - Datasources
+  /datasources/{id}/data:
+    get:
+      description: Queries a datasource connector dynamically for live data or schema
+        metadata (e.g. tables, columns) without exposing credentials. Supported types
+        depend on the provider.
+      parameters:
+      - description: Datasource UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Data/metadata type discriminator (e.g. tables, columns)
+        in: query
+        name: type
+        required: true
+        type: string
+      - description: Optional schema/library filter
+        in: query
+        name: schema
+        type: string
+      - description: Target table name (required when type=columns)
+        in: query
+        name: table
+        type: string
+      - description: Optional substring filter for table search
+        in: query
+        name: filter
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Datasource data
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceDataResponse'
+        "400":
+          description: Invalid request parameters or unsupported provider
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Datasource or table not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Failed to connect to target datasource
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "504":
+          description: Datasource query timed out
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Fetch datasource details or schema metadata
       tags:
       - Datasources
   /models:

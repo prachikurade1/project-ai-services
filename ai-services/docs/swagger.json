@@ -2373,6 +2373,101 @@
                 }
             }
         },
+        "/datasources/{id}/data": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Queries a datasource connector dynamically for live data or schema metadata (e.g. tables, columns) without exposing credentials. Supported types depend on the provider.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Datasources"
+                ],
+                "summary": "Fetch datasource details or schema metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Datasource UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Data/metadata type discriminator (e.g. tables, columns)",
+                        "name": "type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional schema/library filter",
+                        "name": "schema",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target table name (required when type=columns)",
+                        "name": "table",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional substring filter for table search",
+                        "name": "filter",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Datasource data",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceDataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters or unsupported provider",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Datasource or table not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Failed to connect to target datasource",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "Datasource query timed out",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/models": {
             "get": {
                 "security": [
@@ -3772,6 +3867,25 @@
                     "type": "string"
                 },
                 "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceDataResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "datasource_id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }

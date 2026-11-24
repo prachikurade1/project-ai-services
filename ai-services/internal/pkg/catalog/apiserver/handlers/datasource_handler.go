@@ -126,6 +126,62 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetDatasourceData godoc
+//
+//	@Summary		Fetch datasource details or schema metadata
+//	@Description	Queries a datasource connector dynamically for live data or schema metadata (e.g. tables, columns) without exposing credentials. Supported types depend on the provider.
+//	@Tags			Datasources
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id		path		string							true	"Datasource UUID"
+//	@Param			type	query		string							true	"Data/metadata type discriminator (e.g. tables, columns)"
+//	@Param			schema	query		string							false	"Optional schema/library filter"
+//	@Param			table	query		string							false	"Target table name (required when type=columns)"
+//	@Param			filter	query		string							false	"Optional substring filter for table search"
+//	@Success		200		{object}	models.DatasourceDataResponse	"Datasource data"
+//	@Failure		400		{object}	ErrorResponse					"Invalid request parameters or unsupported provider"
+//	@Failure		401		{object}	ErrorResponse					"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse					"Datasource or table not found"
+//	@Failure		422		{object}	ErrorResponse					"Failed to connect to target datasource"
+//	@Failure		500		{object}	ErrorResponse					"Internal Server Error"
+//	@Failure		504		{object}	ErrorResponse					"Datasource query timed out"
+//	@Router			/datasources/{id}/data [get]
+func (h *DatasourceHandler) GetDatasourceData(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid datasource ID format: %v", err),
+		})
+
+		return
+	}
+
+	queryParams := make(map[string]string)
+	for k, v := range c.Request.URL.Query() {
+		if len(v) > 0 {
+			queryParams[k] = v[0]
+		}
+	}
+
+	resp, err := h.datasourceSvc.GetDatasourceData(c.Request.Context(), id, queryParams)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to get datasource data: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to get datasource data",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // GetDatasourceApplications godoc
 //
 //	@Summary		Get connected applications for a datasource

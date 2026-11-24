@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -26,6 +27,8 @@ import (
 )
 
 const (
+	// defaultQueryTimeout bounds the remote execution time for datasource data queries.
+	defaultQueryTimeout = 10 * time.Second
 	// ErrMsgDatasourceNameExists is returned when a connector with the given name already exists.
 	ErrMsgDatasourceNameExists = "Datasource with name %q already exists"
 )
@@ -49,6 +52,8 @@ type DatasourceService struct {
 	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
+	// dataProviders maps providerID → DatasourceDataProvider. Populated by NewDatasourceService.
+	dataProviders map[string]DatasourceDataProvider
 }
 
 // NewDatasourceService creates a DatasourceService wired with all known provider testers.
@@ -76,6 +81,9 @@ func NewDatasourceService(
 			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
 			catalogconstants.DatasourceProviderFileSystem:    NewFileSystemTester(),
 			catalogconstants.DatasourceProviderDb2ForI:       NewDb2ForITester(),
+		},
+		dataProviders: map[string]DatasourceDataProvider{
+			catalogconstants.DatasourceProviderDb2ForI: NewDb2ForIDataProvider(),
 		},
 	}
 }
@@ -1408,6 +1416,54 @@ func (s *DatasourceService) buildApplicationDatasourceItem(connectorID uuid.UUID
 	}
 
 	return item
+}
+
+// GetDatasourceData executes generic data queries for supported datasource providers.
+func (s *DatasourceService) GetDatasourceData(
+	ctx context.Context,
+	datasourceID uuid.UUID,
+	queryParams map[string]string,
+) (*apimodels.DatasourceDataResponse, error) {
+	conn, err := s.connectorRepo.GetByID(ctx, datasourceID, true)
+	if err != nil || conn == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("Datasource %q not found", datasourceID),
+		}
+	}
+
+	dataProvider, ok := s.dataProviders[conn.Provider]
+	if !ok || dataProvider == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("Datasource provider %q does not support the data query API", conn.Provider),
+		}
+	}
+
+	if err := dataProvider.ValidateDataRequest(ctx, queryParams); err != nil {
+		return nil, err
+	}
+
+	decryptedParams, err := s.decryptedConnectionDetails(ctx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt connection metadata: %w", err)
+	}
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, defaultQueryTimeout)
+	defer cancel()
+
+	result, err := dataProvider.FetchData(ctxTimeout, decryptedParams, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return &apimodels.DatasourceDataResponse{
+		DatasourceID: conn.ID,
+		Provider:     conn.Provider,
+		Type:         queryParams["type"],
+		Metadata:     result.Metadata,
+		Data:         result.Data,
+	}, nil
 }
 
 // Made with Bob

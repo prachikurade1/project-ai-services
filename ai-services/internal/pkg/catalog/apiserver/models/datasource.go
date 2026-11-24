@@ -305,4 +305,13 @@ type DatasourceApplicationsResponse struct {
 	Applications []ConnectedApplicationItem `json:"applications"`
 }
 
+// DatasourceDataResponse is the unified response envelope for GET /api/v1/datasources/:id/data.
+type DatasourceDataResponse struct {
+	DatasourceID uuid.UUID      `json:"datasource_id"`
+	Provider     string         `json:"provider"`
+	Type         string         `json:"type"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	Data         any            `json:"data"`
+}
+
 // Made with Bob

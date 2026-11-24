@@ -42,4 +42,21 @@ type ConnectionTester interface {
 	TestConnection(ctx context.Context, params map[string]any) error
 }
 
+// DataResult wraps the retrieved data payload and optional metadata.
+type DataResult struct {
+	Metadata map[string]any `json:"metadata,omitempty"`
+	Data     any            `json:"data"`
+}
+
+// DatasourceDataProvider is an optional interface implemented by datasource providers
+// that support live data or schema querying.
+type DatasourceDataProvider interface {
+	// ValidateDataRequest performs provider-level validation for query parameters.
+	// Returns a *ValidationError (e.g. 400 Bad Request) if parameters are missing or invalid.
+	ValidateDataRequest(ctx context.Context, queryParams map[string]string) error
+
+	// FetchData executes the query against the datasource using decrypted connection params.
+	FetchData(ctx context.Context, params map[string]any, queryParams map[string]string) (*DataResult, error)
+}
+
 // Made with Bob

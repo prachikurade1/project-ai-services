@@ -75,6 +75,12 @@ type DatasourceServiceInterface interface {
 	// Returns a *ValidationError with code 404 when no service_dependencies row links
 	// datasourceID to any service of applicationID.
 	GetApplicationDatasource(ctx context.Context, applicationID, datasourceID uuid.UUID) (*apimodels.GetApplicationDatasourceResponse, error)
+
+	// GetDatasourceData executes generic data queries for supported datasource providers.
+	// Returns a *ValidationError with code 400 when the provider does not support data queries or query parameters are invalid,
+	// 404 when the datasource or requested object is not found, 422 when connectivity to the target fails,
+	// or 504 when the query exceeds the timeout limit.
+	GetDatasourceData(ctx context.Context, id uuid.UUID, queryParams map[string]string) (*apimodels.DatasourceDataResponse, error)
 }
 
 // ApplicationServiceInterface defines the contract for application business logic.

@@ -138,6 +138,10 @@ func (m *mockDatasourceServiceForAuth) GetApplicationDatasource(_ context.Contex
 	return nil, nil
 }
 
+func (m *mockDatasourceServiceForAuth) GetDatasourceData(_ context.Context, _ uuid.UUID, _ map[string]string) (*apimodels.DatasourceDataResponse, error) {
+	return nil, nil
+}
+
 func (m *mockDatasourceServiceForAuth) DisconnectDatasourcesFromApplication(_ context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
 	m.disconnectCalled = true
 	m.lastAppID = applicationID

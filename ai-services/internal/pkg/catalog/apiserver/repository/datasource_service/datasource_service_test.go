@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -198,4 +199,177 @@ func TestCountDatasourceConnectors_MixedTypes(t *testing.T) {
 
 	assert.Equal(t, 2, got)
 	assert.Equal(t, 0, validators.CountDatasourceConnectors(slices.Values([]string(nil)), identity))
+}
+
+type mockConnectorRepoForData struct {
+	dbrepo.ConnectorRepository
+	conn *dbmodels.Connector
+	err  error
+}
+
+func (m *mockConnectorRepoForData) GetByID(_ context.Context, _ uuid.UUID, _ bool) (*dbmodels.Connector, error) {
+	return m.conn, m.err
+}
+
+type mockDataProviderForTest struct {
+	validateErr error
+	fetchResult *DataResult
+	fetchErr    error
+}
+
+func (m *mockDataProviderForTest) ValidateDataRequest(_ context.Context, _ map[string]string) error {
+	return m.validateErr
+}
+
+func (m *mockDataProviderForTest) FetchData(_ context.Context, _ map[string]any, _ map[string]string) (*DataResult, error) {
+	return m.fetchResult, m.fetchErr
+}
+
+func TestGetDatasourceData_NotFound(t *testing.T) {
+	svc := &DatasourceService{
+		connectorRepo: &mockConnectorRepoForData{conn: nil},
+	}
+
+	resp, err := svc.GetDatasourceData(context.Background(), uuid.New(), map[string]string{"type": "tables"})
+	assert.Nil(t, resp)
+	require.Error(t, err)
+
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, valErr.Code)
+}
+
+func TestGetDatasourceData_UnsupportedProvider(t *testing.T) {
+	dsID := uuid.New()
+	conn := &dbmodels.Connector{
+		ID:       dsID,
+		Provider: catalogconstants.DatasourceProviderObjectStorage,
+	}
+
+	svc := &DatasourceService{
+		connectorRepo: &mockConnectorRepoForData{conn: conn},
+		dataProviders: map[string]DatasourceDataProvider{},
+	}
+
+	resp, err := svc.GetDatasourceData(context.Background(), dsID, map[string]string{"type": "tables"})
+	assert.Nil(t, resp)
+	require.Error(t, err)
+
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	assert.Contains(t, valErr.Message, "does not support the data query API")
+}
+
+func TestGetDatasourceData_ValidationFailure(t *testing.T) {
+	dsID := uuid.New()
+	conn := &dbmodels.Connector{
+		ID:       dsID,
+		Provider: catalogconstants.DatasourceProviderDb2ForI,
+	}
+
+	svc := &DatasourceService{
+		connectorRepo: &mockConnectorRepoForData{conn: conn},
+		dataProviders: map[string]DatasourceDataProvider{
+			catalogconstants.DatasourceProviderDb2ForI: &mockDataProviderForTest{
+				validateErr: &ValidationError{Code: http.StatusBadRequest, Message: "Query parameter 'type' is required"},
+			},
+		},
+	}
+
+	resp, err := svc.GetDatasourceData(context.Background(), dsID, map[string]string{})
+	assert.Nil(t, resp)
+	require.Error(t, err)
+
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	assert.Equal(t, "Query parameter 'type' is required", valErr.Message)
+}
+
+func TestGetDatasourceData_Success(t *testing.T) {
+	dsID := uuid.New()
+	conn := &dbmodels.Connector{
+		ID:       dsID,
+		Provider: catalogconstants.DatasourceProviderDb2ForI,
+		Metadata: map[string]any{},
+	}
+
+	catProvider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	expectedTables := []string{"ORDERS", "CUSTOMERS"}
+	expectedMetadata := map[string]any{"schema": "PRODDB", "total": 2}
+
+	svc := &DatasourceService{
+		connectorRepo:   &mockConnectorRepoForData{conn: conn},
+		catalogProvider: catProvider,
+		encryptionKey:   "01234567890123456789012345678901",
+		dataProviders: map[string]DatasourceDataProvider{
+			catalogconstants.DatasourceProviderDb2ForI: &mockDataProviderForTest{
+				fetchResult: &DataResult{
+					Metadata: expectedMetadata,
+					Data:     expectedTables,
+				},
+			},
+		},
+	}
+
+	resp, err := svc.GetDatasourceData(context.Background(), dsID, map[string]string{"type": "tables"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, dsID, resp.DatasourceID)
+	assert.Equal(t, catalogconstants.DatasourceProviderDb2ForI, resp.Provider)
+	assert.Equal(t, "tables", resp.Type)
+	assert.Equal(t, expectedMetadata, resp.Metadata)
+	assert.Equal(t, expectedTables, resp.Data)
+}
+
+func TestDb2ForIDataProvider_ValidateDataRequest(t *testing.T) {
+	provider := NewDb2ForIDataProvider()
+
+	// Missing type.
+	err := provider.ValidateDataRequest(context.Background(), map[string]string{})
+	require.Error(t, err)
+	valErr, ok := err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	assert.Equal(t, "Query parameter 'type' is required", valErr.Message)
+
+	// Invalid type.
+	err = provider.ValidateDataRequest(context.Background(), map[string]string{"type": "indexes"})
+	require.Error(t, err)
+	valErr, ok = err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	assert.Contains(t, valErr.Message, "supported types for 'db2_for_i' are [tables, columns]")
+
+	// Valid tables.
+	err = provider.ValidateDataRequest(context.Background(), map[string]string{"type": "tables"})
+	require.NoError(t, err)
+
+	// Columns missing table.
+	err = provider.ValidateDataRequest(context.Background(), map[string]string{"type": "columns"})
+	require.Error(t, err)
+	valErr, ok = err.(*ValidationError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, valErr.Code)
+	assert.Equal(t, "Parameter 'table' is required when type is 'columns'", valErr.Message)
+
+	// Columns with table.
+	err = provider.ValidateDataRequest(context.Background(), map[string]string{"type": "columns", "table": "ORDERS"})
+	require.NoError(t, err)
+}
+
+func TestExtractString(t *testing.T) {
+	row := map[string]any{
+		"TABLE_NAME": "ORDERS",
+		"NUM_VAL":    123,
+	}
+
+	assert.Equal(t, "ORDERS", extractString(row, "TABLE_NAME"))
+	assert.Equal(t, "ORDERS", extractString(row, "table_name"))
+	assert.Equal(t, "123", extractString(row, "num_val"))
+	assert.Equal(t, "", extractString(row, "NON_EXISTENT"))
 }

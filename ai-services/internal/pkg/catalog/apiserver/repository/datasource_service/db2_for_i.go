@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,18 @@ const (
 	// "technique":"TCP" into the connect payload, forcing the TCP Db2 driver and avoiding the
 	// CCSID 65535 exception. It must be set verbatim.
 	db2ForIProperties = "translate binary=true;ccsid=37\",\"technique\":\"TCP"
+	// db2ForITablesQuery lists table names in a specified schema on IBM i.
+	db2ForITablesQuery = `SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME ASC`
+	// db2ForITablesFilterQuery lists table names in a specified schema filtered by table name.
+	db2ForITablesFilterQuery = `SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ? AND UPPER(TABLE_NAME) LIKE ? ORDER BY TABLE_NAME ASC`
+	// db2ForIColumnsQuery lists column names for a specific table in a schema on IBM i.
+	db2ForIColumnsQuery = `SELECT COLUMN_NAME FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION ASC`
+	// typeTables is the discriminator for table listing.
+	typeTables = "tables"
+	// typeColumns is the discriminator for column listing.
+	typeColumns = "columns"
+	// maxQueryRowsLimit is the maximum rows fetched per query from Mapepire.
+	maxQueryRowsLimit = 1000
 )
 
 // db2ForITester implements ConnectionTester for IBM Db2 for i accessed through Mapepire.
@@ -194,4 +207,224 @@ func runDb2ForIStep[T any](ctx context.Context, fn func() (T, error), cleanup fu
 
 		return zero, fmt.Errorf("timed out after %v: %w", db2ForITimeout, stepCtx.Err())
 	}
+}
+
+// db2ForIDataProvider implements DatasourceDataProvider for IBM Db2 for i.
+type db2ForIDataProvider struct{}
+
+// NewDb2ForIDataProvider returns a new DatasourceDataProvider for IBM Db2 for i.
+func NewDb2ForIDataProvider() DatasourceDataProvider {
+	return &db2ForIDataProvider{}
+}
+
+// ValidateDataRequest performs provider-level validation for query parameters.
+func (p *db2ForIDataProvider) ValidateDataRequest(_ context.Context, queryParams map[string]string) error {
+	typeParam := strings.TrimSpace(queryParams["type"])
+	if typeParam == "" {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: "Query parameter 'type' is required",
+		}
+	}
+
+	if typeParam != typeTables && typeParam != typeColumns {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("Invalid type %q: supported types for 'db2_for_i' are [tables, columns]", typeParam),
+		}
+	}
+
+	if typeParam == typeColumns {
+		tableParam := strings.TrimSpace(queryParams["table"])
+		if tableParam == "" {
+			return &ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: "Parameter 'table' is required when type is 'columns'",
+			}
+		}
+	}
+
+	return nil
+}
+
+// FetchData executes the data query against Db2 for i using Mapepire.
+func (p *db2ForIDataProvider) FetchData(ctx context.Context, params map[string]any, queryParams map[string]string) (*DataResult, error) {
+	if ctx.Err() != nil {
+		return nil, &ValidationError{
+			Code:    http.StatusGatewayTimeout,
+			Message: "Datasource query timed out after 10s",
+		}
+	}
+
+	host, _ := params["host"].(string)
+	database, _ := params["database"].(string)
+	username, _ := params["username"].(string)
+	password, _ := params["password"].(string)
+	port := db2ForIPort(params["port"])
+
+	if err := checkDb2ForINetwork(ctx, net.JoinHostPort(host, port)); err != nil {
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("Failed to connect to IBM Db2 for i: %v", err),
+		}
+	}
+
+	job, err := connectDb2ForIJob(ctx, mapepire.DaemonServer{
+		Host:       host,
+		User:       username,
+		Password:   password,
+		Port:       port,
+		Properties: db2ForIProperties,
+	}, username)
+	if err != nil {
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("Failed to connect to IBM Db2 for i: %v", err),
+		}
+	}
+	defer func() { _ = job.Close() }()
+
+	schema := strings.ToUpper(strings.TrimSpace(database))
+	if s := strings.TrimSpace(queryParams["schema"]); s != "" {
+		schema = strings.ToUpper(s)
+	}
+
+	dataType := strings.TrimSpace(queryParams["type"])
+	switch dataType {
+	case typeTables:
+		return fetchDb2ForITables(ctx, job, schema, queryParams["filter"])
+	case typeColumns:
+		return fetchDb2ForIColumns(ctx, job, schema, queryParams["table"])
+	default:
+		return nil, &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("Invalid type %q: supported types for 'db2_for_i' are [tables, columns]", dataType),
+		}
+	}
+}
+
+// executeDb2ForIQuery runs a query on the Mapepire SQL job and returns row maps or a ValidationError.
+func executeDb2ForIQuery(ctx context.Context, job *mapepire.SQLJob, query string, params [][]any) ([]map[string]interface{}, error) {
+	res, err := runDb2ForIStep(ctx, func() (*mapepire.ServerResponse, error) {
+		q, err := job.QueryWithOptions(query, mapepire.QueryOptions{
+			Rows:       maxQueryRowsLimit,
+			Parameters: params,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return q.Execute()
+	}, nil)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+			return nil, &ValidationError{
+				Code:    http.StatusGatewayTimeout,
+				Message: "Datasource query timed out after 10s",
+			}
+		}
+
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("Database query failed: %v", err),
+		}
+	}
+	if res == nil || !res.Success {
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "Database query reported failure",
+		}
+	}
+
+	return res.Data, nil
+}
+
+// fetchDb2ForITables executes table listing query on IBM i Db2.
+func fetchDb2ForITables(ctx context.Context, job *mapepire.SQLJob, schema, filter string) (*DataResult, error) {
+	var (
+		query  string
+		params [][]any
+	)
+
+	filter = strings.TrimSpace(filter)
+	if filter != "" {
+		query = db2ForITablesFilterQuery
+		params = [][]any{{schema, "%" + strings.ToUpper(filter) + "%"}}
+	} else {
+		query = db2ForITablesQuery
+		params = [][]any{{schema}}
+	}
+
+	rows, err := executeDb2ForIQuery(ctx, job, query, params)
+	if err != nil {
+		return nil, err
+	}
+
+	tables := make([]string, 0, len(rows))
+	for _, row := range rows {
+		name := extractString(row, "TABLE_NAME")
+		if name != "" {
+			tables = append(tables, name)
+		}
+	}
+
+	return &DataResult{
+		Metadata: map[string]any{
+			"schema": schema,
+			"total":  len(tables),
+		},
+		Data: tables,
+	}, nil
+}
+
+// fetchDb2ForIColumns executes column listing query on IBM i Db2.
+func fetchDb2ForIColumns(ctx context.Context, job *mapepire.SQLJob, schema, table string) (*DataResult, error) {
+	upperTable := strings.ToUpper(strings.TrimSpace(table))
+
+	rows, err := executeDb2ForIQuery(ctx, job, db2ForIColumnsQuery, [][]any{{schema, upperTable}})
+	if err != nil {
+		return nil, err
+	}
+
+	columns := make([]string, 0, len(rows))
+	for _, row := range rows {
+		name := extractString(row, "COLUMN_NAME")
+		if name != "" {
+			columns = append(columns, name)
+		}
+	}
+
+	if len(columns) == 0 {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("Table %q not found in schema %q", table, schema),
+		}
+	}
+
+	return &DataResult{
+		Metadata: map[string]any{
+			"table":  upperTable,
+			"schema": schema,
+			"total":  len(columns),
+		},
+		Data: columns,
+	}, nil
+}
+
+// extractString extracts a string value from a row map using case-insensitive key lookup.
+func extractString(row map[string]any, keys ...string) string {
+	for _, key := range keys {
+		for k, v := range row {
+			if strings.EqualFold(k, key) {
+				if str, ok := v.(string); ok {
+					return strings.TrimSpace(str)
+				}
+				if v != nil {
+					return strings.TrimSpace(fmt.Sprintf("%v", v))
+				}
+			}
+		}
+	}
+
+	return ""
 }
