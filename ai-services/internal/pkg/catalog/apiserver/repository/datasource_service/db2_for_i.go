@@ -337,8 +337,18 @@ func (p *db2ForIDataProvider) FetchData(ctx context.Context, params map[string]a
 	username, _ := params["username"].(string)
 	password, _ := params["password"].(string)
 	port := db2ForIPort(params["port"])
+	certificate, _ := params["certificate"].(string)
+	allowInsecure, _ := params["allow_insecure_connection"].(bool)
 
-	if err := checkDb2ForINetwork(ctx, net.JoinHostPort(host, port)); err != nil {
+	tlsCfg, err := db2ForITLSConfig(host, certificate, allowInsecure)
+	if err != nil {
+		return nil, &ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("Failed to connect to IBM Db2 for i: %v", err),
+		}
+	}
+
+	if err := checkDb2ForINetwork(ctx, host, port, tlsCfg); err != nil {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf("Failed to connect to IBM Db2 for i: %v", err),
@@ -346,12 +356,13 @@ func (p *db2ForIDataProvider) FetchData(ctx context.Context, params map[string]a
 	}
 
 	job, err := connectDb2ForIJob(ctx, mapepire.DaemonServer{
-		Host:       host,
-		User:       username,
-		Password:   password,
-		Port:       port,
-		Properties: db2ForIProperties,
-	}, username)
+		Host:               host,
+		User:               username,
+		Password:           password,
+		Port:               port,
+		IgnoreUnauthorized: allowInsecure,
+		Properties:         db2ForIProperties,
+	}, username, tlsCfg)
 	if err != nil {
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
