@@ -1,6 +1,91 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "properties": {},
-  "additionalProperties": false
+  "additionalProperties": false,
+  "properties": {
+    "forecast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table",
+        "targetColumn"
+      ],
+      "properties": {
+        "table": {
+          "type": "string",
+          "title": "Table",
+          "description": "Table in the data source that contains the training dataset",
+          "enum": [
+            "sales_data",
+            "inventory_levels",
+            "customer_orders"
+          ],
+          "x-ui-datasource-param": true
+        },
+        "targetColumn": {
+          "type": "string",
+          "title": "Target column",
+          "description": "Column in the selected table that the model forecasts",
+          "enum": [
+            "sales_amount",
+            "units_sold",
+            "order_count"
+          ],
+          "x-ui-datasource-param": true
+        },
+        "inputColumns": {
+          "type": "array",
+          "title": "Feature columns (optional)",
+          "description": "Additional columns from the selected table to use as features when training the model",
+          "items": {
+            "type": "string",
+            "enum": [
+              "region",
+              "product_category",
+              "store_id",
+              "promotion_flag",
+              "unit_price"
+            ]
+          },
+          "uniqueItems": true,
+          "x-ui-datasource-param": true
+        },
+        "retrainOnNewData": {
+          "type": "boolean",
+          "title": "Retrain model when new data is added",
+          "description": "Keep forecasts current by retraining the model when new data is added to your table. Retrained models become active, but earlier versions are kept for reverting.",
+          "default": true,
+          "x-ui-only": true,
+          "x-ui-controls": "schedule",
+          "x-ui-datasource-param": true
+        },
+        "schedule": {
+          "type": "string",
+          "title": "How often to check for new data",
+          "description": "How often to check the table for new data. Allowed values: hourly, daily, weekly, monthly",
+          "default": "daily",
+          "oneOf": [
+            {
+              "const": "hourly",
+              "title": "Hourly"
+            },
+            {
+              "const": "daily",
+              "title": "Daily"
+            },
+            {
+              "const": "weekly",
+              "title": "Weekly"
+            },
+            {
+              "const": "monthly",
+              "title": "Monthly"
+            }
+          ],
+          "x-ui-controlled-by": "retrainOnNewData",
+          "x-ui-datasource-param": true
+        }
+      }
+    }
+  }
 }

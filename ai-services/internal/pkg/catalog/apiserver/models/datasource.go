@@ -266,13 +266,16 @@ type ListApplicationDatasourcesRequest struct {
 	Search        string // Optional: case-insensitive substring search on datasource name
 }
 
-// ConnectDatasourceRequest is the payload sent to the downstream Digitize service.
+// ConnectDatasourceRequest is the payload sent to the downstream service pod.
 type ConnectDatasourceRequest struct {
 	ID                string         `json:"id"`
 	Name              string         `json:"name"`
 	Type              string         `json:"type"`
 	AllowedExtensions []string       `json:"allowed_extensions,omitempty"`
 	ConnectionDetails map[string]any `json:"connection_details"`
+	// ServiceSettings carries the service's deploy-time params. It is only populated for services
+	// whose datasource.include_service_settings is true.
+	ServiceSettings map[string]any `json:"service_settings,omitempty"`
 }
 
 // ConnectDatasourcesRequest is the request body for connecting one or more datasources to an application.

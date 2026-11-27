@@ -36,7 +36,8 @@ type DatasourceServiceInterface interface {
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// serviceParams holds the deploy-time params keyed by service catalog ID; it may be nil (e.g. post-creation connect).
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, serviceParams map[string]map[string]any) (*apimodels.ConnectDatasourcesResponse, error)
 	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
 	// eligible service in a running application and removes the service_dependency record.
 	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error

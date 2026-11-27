@@ -33,7 +33,7 @@ import (
 // which is the single method called after a successful deployment. This narrow interface
 // breaks the import cycle between the application_service and repository packages.
 type DatasourceConnector interface {
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, serviceParams map[string]map[string]any) (*apimodels.ConnectDatasourcesResponse, error)
 }
 
 // ValidationError represents a validation error with HTTP status code.
@@ -867,7 +867,7 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 		return
 	}
 
-	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs)
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs, collectServiceParams(services))
 	if err != nil {
 		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
 
@@ -903,6 +903,20 @@ func collectDatasourceIDs(ctx context.Context, services []apimodels.Service) []u
 	}
 
 	return ids
+}
+
+// collectServiceParams returns the deploy-time params of each service in the create request,
+// keyed by service catalog ID. Services without params are omitted.
+func collectServiceParams(services []apimodels.Service) map[string]map[string]any {
+	params := make(map[string]map[string]any, len(services))
+
+	for _, svc := range services {
+		if len(svc.Params) > 0 {
+			params[svc.CatalogID] = svc.Params
+		}
+	}
+
+	return params
 }
 
 // logConnectErrors logs any per-datasource failures returned by ConnectDatasourcesToApplication.

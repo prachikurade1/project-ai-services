@@ -97,6 +97,9 @@ type DatasourceSettings struct {
 	// one time (creation-time and post-creation connections combined). nil means unlimited.
 	// Must be >= 1 when set.
 	MaxConnections *int `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
+	// IncludeServiceSettings, when true, makes the catalog send the service's deploy-time params
+	// as "service_settings" in the downstream POST /v1/connectors request. Defaults to false.
+	IncludeServiceSettings bool `yaml:"include_service_settings,omitempty" json:"include_service_settings,omitempty"`
 }
 
 // Service represents a deployable AI service.

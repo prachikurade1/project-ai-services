@@ -13,6 +13,12 @@ dependencies:
   - id: ml_inference
 
 standalone: true
+datasource:
+  required: true
+  supported_providers:
+    - db2_for_i
+  max_connections: 1
+  include_service_settings: true
 
 # About field containing detailed service information
 about:

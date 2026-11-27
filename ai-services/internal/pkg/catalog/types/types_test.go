@@ -173,6 +173,26 @@ datasource:
 		svc.Datasource.SupportedProviders[1] != "file_system" {
 		t.Errorf("Unexpected SupportedProviders: %v", svc.Datasource.SupportedProviders)
 	}
+	if svc.Datasource.IncludeServiceSettings {
+		t.Errorf("Expected IncludeServiceSettings to default to false")
+	}
+
+	yamlWithServiceSettings := `
+id: forecast
+name: Forecast
+type: service
+datasource:
+  required: true
+  include_service_settings: true
+`
+	var forecastSvc Service
+	if err := yaml.Unmarshal([]byte(yamlWithServiceSettings), &forecastSvc); err != nil {
+		t.Fatalf("Failed to unmarshal YAML with include_service_settings: %v", err)
+	}
+
+	if forecastSvc.Datasource == nil || !forecastSvc.Datasource.IncludeServiceSettings {
+		t.Errorf("Expected IncludeServiceSettings to be true")
+	}
 
 	yamlWithoutDatasource := `
 id: chat

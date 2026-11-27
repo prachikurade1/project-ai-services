@@ -629,13 +629,14 @@ postgres:
 
 An optional `values.schema.json` (JSON Schema draft-07) declares which fields the user can configure through the catalog UI. Fields absent from the schema are treated as internal defaults and are not surfaced in the UI.
 
-Three custom `x-ui-*` extensions control form rendering:
+Four custom `x-ui-*` extensions control form rendering:
 
 | Keyword | Description |
 |---|---|
 | `x-ui-only` | Rendered in the UI form but **not** passed into templates. Use for toggle controls. |
 | `x-ui-controls` | Names the field whose UI visibility this field gates. |
 | `x-ui-controlled-by` | This field is hidden in the UI unless the named field is `true`. |
+| `x-ui-datasource-param` | When `true`, the field is rendered on the deploy flow's data source step instead of the configure step. Only takes effect for services that declare a `datasource:` block in `metadata.yaml`; otherwise the field stays on the configure step. |
 
 **Example:**
 

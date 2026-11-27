@@ -440,10 +440,14 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 // Results are returned per datasource. At least one eligible service must exist; the call
 // returns 422 if none are found.
 //
+// serviceParams holds the deploy-time params keyed by service catalog ID. They are forwarded
+// downstream as service_settings only for services with datasource.include_service_settings set.
+// It may be nil (e.g. post-creation connect, where params are not available).
+//
 // This method is the single reusable core for both:
 //   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
 //   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, serviceParams map[string]map[string]any) (*apimodels.ConnectDatasourcesResponse, error) {
 	// Verify application exists and ownership.
 	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
@@ -463,7 +467,7 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 	var connErrors []apimodels.DatasourceConnectionError
 
 	for _, datasourceID := range datasourceIDs {
-		_, connectErr := s.connectOneDatasource(ctx, datasourceID, linkedServices)
+		_, connectErr := s.connectOneDatasource(ctx, datasourceID, linkedServices, serviceParams)
 		if connectErr != nil {
 			connErrors = append(connErrors, apimodels.DatasourceConnectionError{
 				DatasourceID: datasourceID.String(),
@@ -481,7 +485,7 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 
 // connectOneDatasource loads, decrypts, and propagates a single datasource connector
 // to all eligible services. Returns the last connected service ID on success.
-func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) (uuid.UUID, error) {
+func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow, serviceParams map[string]map[string]any) (uuid.UUID, error) {
 	connector, err := s.loadConnector(ctx, datasourceID)
 	if err != nil {
 		return uuid.Nil, err
@@ -518,7 +522,7 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 	var connectedServiceID uuid.UUID
 
 	for _, svc := range linkedServices {
-		if err := s.sendToService(ctx, proxy, svc, connector, connectionDetails, datasourceID); err != nil {
+		if err := s.sendToService(ctx, proxy, svc, connector, connectionDetails, datasourceID, serviceParams[svc.ServiceCatalogID]); err != nil {
 			return uuid.Nil, err
 		}
 
@@ -680,6 +684,7 @@ func (s *DatasourceService) sendToService(
 	connector *dbmodels.Connector,
 	connectionDetails map[string]any,
 	datasourceID uuid.UUID,
+	serviceParams map[string]any,
 ) error {
 	if svc.URL == "" {
 		return fmt.Errorf("service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ServiceID, svc.ServiceCatalogID)
@@ -703,6 +708,7 @@ func (s *DatasourceService) sendToService(
 		Type:              connector.Provider,
 		AllowedExtensions: allowedExtensions,
 		ConnectionDetails: connectionDetails,
+		ServiceSettings:   s.serviceSettingsFor(svc.ServiceCatalogID, serviceParams),
 	}
 
 	if err := catalogclient.NewServiceClient(proxy, svc.URL).Connect(ctx, connectReq); err != nil {
@@ -724,6 +730,21 @@ func (s *DatasourceService) sendToService(
 	}
 
 	return nil
+}
+
+// serviceSettingsFor returns the service params to forward as service_settings, or nil when the
+// catalog service does not set datasource.include_service_settings or has no params.
+func (s *DatasourceService) serviceSettingsFor(serviceCatalogID string, serviceParams map[string]any) map[string]any {
+	if len(serviceParams) == 0 {
+		return nil
+	}
+
+	catalogSvc, err := s.catalogProvider.LoadService(serviceCatalogID)
+	if err != nil || catalogSvc.Datasource == nil || !catalogSvc.Datasource.IncludeServiceSettings {
+		return nil
+	}
+
+	return serviceParams
 }
 
 // UpdateDatasource updates only the updatable credential fields for a datasource.

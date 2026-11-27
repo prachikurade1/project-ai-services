@@ -21,6 +21,7 @@
    - 6.4 [Catalog API Server Enforcement and Validation Rules](#64-catalog-api-server-enforcement-and-validation-rules)
    - 6.5 [Filtering Available Connectors and Datasources by Service Type](#65-filtering-available-connectors-and-datasources-by-service-type)
    - 6.6 [API Models and Deploy Options Propagation](#66-api-models-and-deploy-options-propagation)
+   - 6.7 [Forwarding Service Settings to the Downstream Connector (`include_service_settings`)](#67-forwarding-service-settings-to-the-downstream-connector-include_service_settings)
 
 ---
 
@@ -278,6 +279,7 @@ datasource:
   allow_disconnect: <boolean> # Default: true if required=false, false if required=true
   supported_providers: <list> # Default: [] (all supported)
   max_connections: <integer> # Default: unset (unlimited)
+  include_service_settings: <boolean> # Default: false (forward service params to the downstream connect call)
 ```
 
 #### Settings Reference
@@ -290,6 +292,7 @@ datasource:
 | `datasource.allow_disconnect`    | `boolean`      | `true` (if `required: false`)<br/>`false` (if `required: true`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked.                                        |
 | `datasource.supported_providers` | `list[string]` | `[]` (all supported)                                            | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
 | `datasource.max_connections`     | `integer`      | unset (unlimited)                                               | Maximum number of datasources that can be connected to the service at any time (creation-time and post-creation connections combined). Must be `>= 1` when present. If omitted, any number of datasources can be connected. |
+| `datasource.include_service_settings` | `boolean` | `false`                                                         | When `true`, the catalog includes the service's deploy-time parameters, unmodified, as a `service_settings` object in the downstream `POST /v1/connectors` request. When `false` or omitted, the request body is unchanged and no `service_settings` key is sent. See [§6.7](#67-forwarding-service-settings-to-the-downstream-connector-include_service_settings). |
 
 #### Lifecycle and Compatibility Matrix
 
@@ -324,6 +327,27 @@ datasource:
   max_connections: 1
 ```
 
+#### Example 1b: Forecast Service Needing Its Parameters on the Connect Call (`metadata.yaml`)
+
+The Forecast service needs the training dataset mapping (`table`, `targetColumn`, `inputColumns`, `schedule`) when the connector is created, so it opts in to `include_service_settings`:
+
+```yaml
+# ai-services/assets/services/forecast/metadata.yaml
+id: forecast
+name: "Forecast"
+type: service
+
+# Grouped Datasource Configuration
+datasource:
+  required: true
+  allow_connect: false
+  allow_disconnect: false
+  supported_providers:
+    - db2_for_i
+  max_connections: 1
+  include_service_settings: true # forward service params as "service_settings"
+```
+
 #### Example 2: Document Processing Service with Optional Dynamic Datasources (`metadata.yaml`)
 
 ```yaml
@@ -341,6 +365,7 @@ datasource:
     - file_system
     - object_storage
   # max_connections omitted: any number of datasources can be connected
+  # include_service_settings omitted (false): connect payload is unchanged
 ```
 
 ---
@@ -473,6 +498,9 @@ type DatasourceConfig struct {
     AllowDisconnect    *bool    `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
     SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
     MaxConnections     *int     `yaml:"max_connections,omitempty" json:"max_connections,omitempty"` // nil = unlimited
+    // IncludeServiceSettings makes the catalog send the service's deploy-time params as
+    // "service_settings" in the downstream POST /v1/connectors request. Defaults to false.
+    IncludeServiceSettings bool `yaml:"include_service_settings,omitempty" json:"include_service_settings,omitempty"`
 }
 
 // Service represents a deployable AI service catalog definition.
@@ -503,5 +531,82 @@ type DeployOptionsService struct {
     Datasource *DeployOptionsDatasource `json:"datasource,omitempty"`
 }
 ```
+
+`include_service_settings` is a server-side dispatch concern, so it is intentionally **not** added to `DeployOptionsDatasource`; UI clients do not need it.
+
+---
+
+### 6.7 Forwarding Service Settings to the Downstream Connector (`include_service_settings`)
+
+#### Problem
+
+By default the catalog's downstream connect call (`POST /v1/connectors`) carries only the connector identity and its decrypted credentials. Some services need their own deploy-time parameters at that moment as well. Forecast, for example, must know which table and target column to train on when the connector is created. Other services, such as Digitize, must keep working exactly as they do today.
+
+#### Solution
+
+A service-level opt-in flag in the `datasource` block of `metadata.yaml`:
+
+| Flag value            | Downstream `POST /v1/connectors` body                                                 |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `false` / omitted     | `{ id, name, type, allowed_extensions?, connection_details }` — **unchanged** (Digitize) |
+| `true`                | Same as above **plus** `service_settings` holding the service's params (Forecast)       |
+
+#### Request Payload (Forecast, flag enabled)
+
+```json
+{
+  "id": "c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "name": "prod-sales-db",
+  "type": "db2_for_i",
+  "connection_details": {
+    "host": "ibmi.example.com",
+    "port": 8471,
+    "database": "PRODDB",
+    "username": "forecast_ro",
+    "password": "********",
+    "ignore_secure_connection": false,
+    "certificate": "<cert>"
+  },
+  "service_settings": {
+    "forecast": {
+      "table": "sales_data",
+      "targetColumn": "sales_amount",
+      "inputColumns": ["region", "unit_price"],
+      "schedule": "daily"
+    }
+  }
+}
+```
+
+#### Behavior Rules
+
+1. **Verbatim forwarding.** `service_settings` is the service's `params` exactly as submitted in the create-application request, nested by the service's `values.schema.json` (hence the `forecast` key above). The catalog does not filter, rename or remap fields, and does not restrict them to `x-ui-datasource-param` fields.
+2. **Omitted when empty.** If the flag is `false`, the service has no params, or the params are empty, the `service_settings` key is not sent (`omitempty`).
+3. **Scoped per service.** Params are looked up by the target service's catalog ID. When an application has several services, each service receives only its own params.
+4. **Non-secret data only.** `service_settings` carries service parameters, not credentials. Credentials stay in `connection_details`. Neither should be written to logs.
+
+#### Where the Params Come From
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CAS as Catalog API Server (application_service)
+    participant DS as DatasourceService
+    participant Cat as Catalog (metadata.yaml)
+    participant SVC as Service Pod (POST /v1/connectors)
+
+    CAS->>DS: ConnectDatasourcesToApplication(app, datasourceIDs,<br/>serviceParams{catalogID → params})
+    loop each eligible service
+        DS->>Cat: LoadService(catalogID).datasource.include_service_settings
+        alt flag == true and params not empty
+            DS->>SVC: POST { id, name, type, connection_details, service_settings }
+        else
+            DS->>SVC: POST { id, name, type, [allowed_extensions], connection_details }
+        end
+    end
+```
+
+- **Application creation (post-deploy attach):** `attachConnectorsPostDeploy` builds `serviceParams` (service catalog ID → `params`) from the create request and passes it to `ConnectDatasourcesToApplication`.
+- **Post-creation connect (`PUT /applications/:id/datasources`):** service params are not persisted after deploy, so `serviceParams` is `nil` and **no `service_settings` is sent**. Services that set `include_service_settings: true` should also set `allow_connect: false` (as in Example 1b) so the datasource is only attached at creation time, when the params are available.
 
 ---
