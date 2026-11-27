@@ -2957,10 +2957,6 @@ paths:
         name: type
         required: true
         type: string
-      - description: Optional schema/library filter
-        in: query
-        name: schema
-        type: string
       - description: Target table name (required when type=columns)
         in: query
         name: table

@@ -2411,12 +2411,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional schema/library filter",
-                        "name": "schema",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
                         "description": "Target table name (required when type=columns)",
                         "name": "table",
                         "in": "query"

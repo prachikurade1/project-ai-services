@@ -135,7 +135,6 @@ func (h *DatasourceHandler) GetDatasource(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			id		path		string							true	"Datasource UUID"
 //	@Param			type	query		string							true	"Data/metadata type discriminator (e.g. tables, columns)"
-//	@Param			schema	query		string							false	"Optional schema/library filter"
 //	@Param			table	query		string							false	"Target table name (required when type=columns)"
 //	@Success		200		{object}	models.DatasourceDataResponse	"Datasource data"
 //	@Failure		400		{object}	ErrorResponse					"Invalid request parameters or unsupported provider"

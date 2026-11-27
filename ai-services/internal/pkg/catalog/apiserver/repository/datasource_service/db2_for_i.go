@@ -370,9 +370,6 @@ func (p *db2ForIDataProvider) FetchData(ctx context.Context, params map[string]a
 	defer func() { _ = job.Close() }()
 
 	schema := strings.ToUpper(strings.TrimSpace(database))
-	if s := strings.TrimSpace(queryParams["schema"]); s != "" {
-		schema = strings.ToUpper(s)
-	}
 
 	dataType := strings.TrimSpace(queryParams["type"])
 	switch dataType {
