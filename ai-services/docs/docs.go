@@ -2420,12 +2420,6 @@ const docTemplate = `{
                         "description": "Target table name (required when type=columns)",
                         "name": "table",
                         "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Optional substring filter for table search",
-                        "name": "filter",
-                        "in": "query"
                     }
                 ],
                 "responses": {

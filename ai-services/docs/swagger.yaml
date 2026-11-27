@@ -2965,10 +2965,6 @@ paths:
         in: query
         name: table
         type: string
-      - description: Optional substring filter for table search
-        in: query
-        name: filter
-        type: string
       produces:
       - application/json
       responses:

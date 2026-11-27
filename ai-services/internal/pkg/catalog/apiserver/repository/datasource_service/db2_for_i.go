@@ -33,8 +33,6 @@ const (
 	db2ForIProperties = "translate binary=true;ccsid=37\",\"technique\":\"TCP"
 	// db2ForITablesQuery lists table names in a specified schema on IBM i.
 	db2ForITablesQuery = `SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME ASC`
-	// db2ForITablesFilterQuery lists table names in a specified schema filtered by table name.
-	db2ForITablesFilterQuery = `SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ? AND UPPER(TABLE_NAME) LIKE ? ORDER BY TABLE_NAME ASC`
 	// db2ForIColumnsQuery lists column names for a specific table in a schema on IBM i.
 	db2ForIColumnsQuery = `SELECT COLUMN_NAME FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION ASC`
 	// typeTables is the discriminator for table listing.
@@ -379,7 +377,7 @@ func (p *db2ForIDataProvider) FetchData(ctx context.Context, params map[string]a
 	dataType := strings.TrimSpace(queryParams["type"])
 	switch dataType {
 	case typeTables:
-		return fetchDb2ForITables(ctx, job, schema, queryParams["filter"])
+		return fetchDb2ForITables(ctx, job, schema)
 	case typeColumns:
 		return fetchDb2ForIColumns(ctx, job, schema, queryParams["table"])
 	default:
@@ -427,22 +425,8 @@ func executeDb2ForIQuery(ctx context.Context, job *mapepire.SQLJob, query string
 }
 
 // fetchDb2ForITables executes table listing query on IBM i Db2.
-func fetchDb2ForITables(ctx context.Context, job *mapepire.SQLJob, schema, filter string) (*DataResult, error) {
-	var (
-		query  string
-		params [][]any
-	)
-
-	filter = strings.TrimSpace(filter)
-	if filter != "" {
-		query = db2ForITablesFilterQuery
-		params = [][]any{{schema, "%" + strings.ToUpper(filter) + "%"}}
-	} else {
-		query = db2ForITablesQuery
-		params = [][]any{{schema}}
-	}
-
-	rows, err := executeDb2ForIQuery(ctx, job, query, params)
+func fetchDb2ForITables(ctx context.Context, job *mapepire.SQLJob, schema string) (*DataResult, error) {
+	rows, err := executeDb2ForIQuery(ctx, job, db2ForITablesQuery, [][]any{{schema}})
 	if err != nil {
 		return nil, err
 	}
