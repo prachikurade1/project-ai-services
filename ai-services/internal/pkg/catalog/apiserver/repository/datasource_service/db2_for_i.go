@@ -2,15 +2,19 @@ package datasourceservice
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mapepire "github.com/deady54/mapepire-go"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -41,6 +45,9 @@ const (
 	maxQueryRowsLimit = 1000
 )
 
+// mapepireDialerMu synchronizes custom TLS configuration changes applied to websocket.DefaultDialer.
+var mapepireDialerMu sync.Mutex
+
 // db2ForITester implements ConnectionTester for IBM Db2 for i accessed through Mapepire.
 type db2ForITester struct{}
 
@@ -50,29 +57,39 @@ func NewDb2ForITester() ConnectionTester {
 }
 
 // TestConnection runs three sequential checks against a Mapepire daemon:
-//  1. Network — TCP dial to host:port (port defaults to 8076 when not supplied).
+//  1. Network — TCP dial to host:port (port defaults to 8076 when not supplied) followed by a
+//     TLS handshake that verifies the server certificate (using the optional certificate
+//     or insecure setting if provided).
 //  2. Auth    — Mapepire WebSocket handshake and IBM i authentication.
 //  3. Access  — read-only query confirming the configured database is accessible to the user.
 //
-// TLS certificates are always verified.
+// Certificate verification is performed unless allow_insecure_connection is enabled.
 func (t *db2ForITester) TestConnection(ctx context.Context, params map[string]any) error {
 	host, _ := params["host"].(string)
 	database, _ := params["database"].(string)
 	username, _ := params["username"].(string)
 	password, _ := params["password"].(string)
 	port := db2ForIPort(params["port"])
+	certificate, _ := params["certificate"].(string)
+	allowInsecure, _ := params["allow_insecure_connection"].(bool)
 
-	if err := checkDb2ForINetwork(ctx, net.JoinHostPort(host, port)); err != nil {
+	tlsCfg, err := db2ForITLSConfig(host, certificate, allowInsecure)
+	if err != nil {
+		return err
+	}
+
+	if err := checkDb2ForINetwork(ctx, host, port, tlsCfg); err != nil {
 		return err
 	}
 
 	job, err := connectDb2ForIJob(ctx, mapepire.DaemonServer{
-		Host:       host,
-		User:       username,
-		Password:   password,
-		Port:       port,
-		Properties: db2ForIProperties,
-	}, username)
+		Host:               host,
+		User:               username,
+		Password:           password,
+		Port:               port,
+		IgnoreUnauthorized: allowInsecure,
+		Properties:         db2ForIProperties,
+	}, username, tlsCfg)
 	if err != nil {
 		return err
 	}
@@ -98,8 +115,40 @@ func db2ForIPort(raw any) string {
 	return db2ForIDefaultPort
 }
 
-// checkDb2ForINetwork verifies TCP reachability of the Mapepire daemon.
-func checkDb2ForINetwork(ctx context.Context, addr string) error {
+// db2ForITLSConfig creates a *tls.Config with the given host, optional PEM certificate, and insecure setting.
+func db2ForITLSConfig(host, certPEM string, allowInsecure bool) (*tls.Config, error) {
+	tlsCfg := &tls.Config{
+		ServerName:         host,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: allowInsecure,
+	}
+
+	if certPEM != "" {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM([]byte(certPEM)) {
+			return nil, &ConnectionCheckError{
+				CheckType: ConnectionCheckAuth,
+				Message:   "invalid certificate: failed to parse PEM certificate",
+			}
+		}
+		if !allowInsecure {
+			tlsCfg.RootCAs = pool
+		}
+	}
+
+	return tlsCfg, nil
+}
+
+// checkDb2ForINetwork verifies TCP reachability of the Mapepire daemon and that its TLS
+// certificate can be verified. The Mapepire SDK flattens connect errors into strings, so a
+// certificate failure there is indistinguishable from a credential failure; checking it here
+// keeps it classified as a network error.
+func checkDb2ForINetwork(ctx context.Context, host, port string, tlsCfg *tls.Config) error {
+	addr := net.JoinHostPort(host, port)
+
 	dialCtx, cancel := context.WithTimeout(ctx, db2ForITimeout)
 	defer cancel()
 
@@ -113,17 +162,44 @@ func checkDb2ForINetwork(ctx context.Context, addr string) error {
 		}
 	}
 	// The Mapepire SDK opens its own WebSocket connection.
-	_ = conn.Close()
+	defer func() { _ = conn.Close() }()
+
+	return checkDb2ForITLS(dialCtx, conn, addr, tlsCfg)
+}
+
+// checkDb2ForITLS performs a TLS handshake over an established TCP connection using the provided
+// TLS configuration. Only certificate verification failures are reported; other handshake failures
+// are left to the connect step.
+func checkDb2ForITLS(ctx context.Context, conn net.Conn, addr string, tlsCfg *tls.Config) error {
+	err := tls.Client(conn, tlsCfg).HandshakeContext(ctx)
+
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return &ConnectionCheckError{
+			CheckType: ConnectionCheckNetwork,
+			Message:   fmt.Sprintf("TLS handshake with %s failed: %v", addr, err),
+		}
+	}
 
 	return nil
 }
 
 // connectDb2ForIJob opens an authenticated Mapepire SQL job. Connect does not accept a
 // context, so it is raced against the phase timeout; a job that connects late is closed.
-func connectDb2ForIJob(ctx context.Context, creds mapepire.DaemonServer, username string) (*mapepire.SQLJob, error) {
+func connectDb2ForIJob(ctx context.Context, creds mapepire.DaemonServer, username string, tlsCfg *tls.Config) (*mapepire.SQLJob, error) {
 	job := mapepire.NewSQLJob(db2ForIJobID)
 
 	_, err := runDb2ForIStep(ctx, func() (struct{}, error) {
+		mapepireDialerMu.Lock()
+		origTLS := websocket.DefaultDialer.TLSClientConfig
+		if tlsCfg != nil && !creds.IgnoreUnauthorized {
+			websocket.DefaultDialer.TLSClientConfig = tlsCfg
+		}
+		defer func() {
+			websocket.DefaultDialer.TLSClientConfig = origTLS
+			mapepireDialerMu.Unlock()
+		}()
+
 		return struct{}{}, job.Connect(creds)
 	}, func(struct{}) { _ = job.Close() })
 	if err != nil {
